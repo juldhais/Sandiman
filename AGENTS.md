@@ -18,8 +18,9 @@ acceptable regardless of what they make easier.
 Windows, PowerShell. **`npm` is blocked by the execution policy** — always use
 `npm.cmd` (e.g. `npm.cmd run dev`). `npx` likewise needs `npx.cmd`.
 
-`git` reports this directory is not a repository, despite the template shipping a
-`.gitignore`. Do not assume git operations will work; verify first.
+Git is initialised on `main`. `.gitattributes` normalises line endings to LF,
+so do not add `core.autocrlf` overrides on top of it — that combination is what
+produces whole-file diffs.
 
 ## Commands
 
