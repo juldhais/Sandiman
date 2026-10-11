@@ -58,6 +58,13 @@ npm run lint        # oxlint
 
 On Windows, use `npm.cmd` — PowerShell's execution policy blocks `npm.ps1`.
 
+### Install as an app
+
+After opening the production site over HTTPS, use the browser's install option
+to add Sandiman to your device. The service worker caches the static app shell
+for offline startup; vault data remains in IndexedDB and is never added to the
+service-worker cache.
+
 ## Deploying to Azure Static Web Apps
 
 Run `./scripts/deploy-swa.ps1` from PowerShell. The script builds the app,

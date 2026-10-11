@@ -13,3 +13,11 @@ createRoot(container).render(
     <App />
   </StrictMode>,
 )
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  void navigator.serviceWorker
+    .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+    .catch((cause: unknown) => {
+      console.warn('Sandiman could not register its offline app shell.', cause)
+    })
+}
