@@ -1,43 +1,31 @@
 /**
  * Azure Blob Storage sync panel.
  *
- * The credential is stored inside the master-key-encrypted vault payload, never
- * in plaintext storage, and is stripped before upload. The panel warns about
- * connection strings specifically, because they grant account-wide access.
+ * Azure settings are stored inside the master-key-encrypted vault payload and
+ * stripped before upload. Browser sync uses a Blob SAS URL.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
   CloudUpload,
   Info,
   Loader2,
-  ShieldAlert,
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { describeCredential, readAccountName } from '@/sync/credentialParsing'
 import { SyncError, runSync, verifySyncCredentials } from '@/sync/syncEngine'
-import {
-  isSyncConfigured,
-  missingSyncFields,
-  type SyncCredentialKind,
-} from '@/sync/types'
+import { isSyncConfigured, missingSyncFields } from '@/sync/types'
 import { useVaultStore } from '@/state/vaultStore'
 import { VAULT_PAYLOAD_VERSION } from '@/storage/types'
+import { verifyMasterPassword } from '@/storage/vaultService'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/PasswordInput'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -57,40 +45,29 @@ export function SyncPanel({
   onOpenChange: (open: boolean) => void
 }) {
   const config = useVaultStore((state) => state.sync.config)
-  const syncPassword = useVaultStore((state) => state.sync.password)
   const settings = useVaultStore((state) => state.settings)
   const items = useVaultStore((state) => state.items)
   const deletedItems = useVaultStore((state) => state.deletedItems)
   const templates = useVaultStore((state) => state.templates)
   const updateSyncConfig = useVaultStore((state) => state.updateSyncConfig)
-  const setSyncPassword = useVaultStore((state) => state.setSyncPassword)
   const updateSettings = useVaultStore((state) => state.updateSettings)
   const applyMergedPayload = useVaultStore((state) => state.applyMergedPayload)
 
-  const [passwordDraft, setPasswordDraft] = useState(syncPassword)
+  const [masterPassword, setMasterPassword] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [verification, setVerification] = useState<{ ok: boolean; text: string } | null>(null)
   const [lastRun, setLastRun] = useState<string | null>(null)
 
-  // Reset the draft when the panel closes so an abandoned edit is discarded.
-  useEffect(() => {
-    if (!open) setPasswordDraft(syncPassword)
-  }, [open, syncPassword])
-
   const missing = useMemo(() => missingSyncFields(config), [config])
   const credential = useMemo(() => describeCredential(config), [config])
   const account = useMemo(() => readAccountName(config), [config])
-
-  function setKind(kind: SyncCredentialKind): void {
-    updateSyncConfig({ kind, accountName: kind === 'connection-string' ? '' : account })
-  }
 
   async function handleVerify(): Promise<void> {
     setVerifying(true)
     setVerification(null)
     try {
-      const result = await verifySyncCredentials(config, passwordDraft)
+      const result = await verifySyncCredentials(config)
       setVerification({ ok: result.ok, text: result.summary })
       if (result.ok) toast.success('Storage is reachable')
       else toast.error('Could not reach the vault', { description: result.summary })
@@ -100,30 +77,29 @@ export function SyncPanel({
   }
 
   async function handleSync(): Promise<void> {
-    if (passwordDraft !== syncPassword) {
-      await setSyncPassword(passwordDraft)
-    }
-
     setSyncing(true)
     try {
+      if (masterPassword && !(await verifyMasterPassword(masterPassword))) {
+        throw new SyncError('wrong-master-password', 'That is not this vault’s master password.')
+      }
+
       const result = await runSync({
         config,
-        syncPassword: passwordDraft,
+        masterPassword,
         payload: {
           version: VAULT_PAYLOAD_VERSION,
           items: [...items, ...deletedItems],
           templates,
           settings,
           updatedAt: Date.now(),
-          sync: { config, password: passwordDraft },
+          sync: { config },
         },
       })
 
-      // Adopt the merged result locally, keeping this device's own sync
-      // credentials, which the remote blob never carried.
+      // Keep this device's own Azure configuration, which the remote blob never carried.
       await applyMergedPayload({
         ...result.mergedPayload,
-        sync: { config, password: passwordDraft },
+        sync: { config },
       })
       await updateSettings({ lastSyncAt: result.outcome.completedAt })
 
@@ -135,6 +111,7 @@ export function SyncPanel({
           : 'Everything is already up to date.'
 
       setLastRun(summary)
+      setMasterPassword('')
       toast.success(initialUpload ? 'Vault uploaded' : 'Sync complete', {
         description: summary,
       })
@@ -149,110 +126,55 @@ export function SyncPanel({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) setMasterPassword('')
+        onOpenChange(nextOpen)
+      }}
+    >
       <SheetContent side="right">
         <SheetHeader>
           <SheetTitle>Sync to Azure Blob Storage</SheetTitle>
           <SheetDescription>
-            Your vault is encrypted with a key derived from the sync password before
-            it is uploaded. Azure only ever sees ciphertext.
+            Your vault is encrypted with a key derived from your master password
+            before upload. Use the same master password on each device; Azure only
+            receives ciphertext. Changing your master password makes existing remote
+            data unreadable until it is migrated.
           </SheetDescription>
         </SheetHeader>
 
         <div className="scrollbar-slim flex-1 space-y-5 overflow-y-auto p-6">
-          {config.kind === 'connection-string' ? (
-            <Alert variant="warning">
-              <ShieldAlert />
-              <AlertTitle>Connection strings grant account-wide access</AlertTitle>
-              <AlertDescription>
-                A connection string contains the storage account key. Anything able to
-                read this browser's storage can act on your entire account, not just
-                this vault. A SAS token scoped to one container is the safer option.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-
           <div className="space-y-2">
-            <Label htmlFor="sync-kind">Credential type</Label>
-            <Select value={config.kind} onValueChange={(value: SyncCredentialKind) => setKind(value)}>
-              <SelectTrigger id="sync-kind" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sas">SAS token (recommended)</SelectItem>
-                <SelectItem value="connection-string">Connection string</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="sync-email">Sync email</Label>
-            <Input
-              id="sync-email"
-              type="email"
-              value={config.email}
-              onChange={(event) => updateSyncConfig({ email: event.target.value })}
-              placeholder="you@example.com"
-              autoComplete="username"
-            />
-            <p className="text-muted-foreground text-xs">
-              Combined with the sync password to derive the upload key. It must match
-              on every device.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="sync-password">Sync password</Label>
+            <Label htmlFor="sync-master-password">Master password</Label>
             <PasswordInput
-              id="sync-password"
-              value={passwordDraft}
-              onChange={(event) => setPasswordDraft(event.target.value)}
+              id="sync-master-password"
+              value={masterPassword}
+              onChange={(event) => setMasterPassword(event.target.value)}
               autoComplete="current-password"
               spellCheck={false}
             />
             <p className="text-muted-foreground text-xs">
-              This is a separate password from your master password. It can differ from
-              it, and should.
+              Needed when syncing for the first time on this device after unlocking.
+              It is used only in memory and is never saved with sync settings.
             </p>
           </div>
 
-          {config.kind === 'sas' ? (
-            <div className="space-y-2">
-              <Label htmlFor="sync-sas">SAS token or URL</Label>
-              <TextareaLike
-                id="sync-sas"
-                value={config.sasToken}
-                onChange={(value) => updateSyncConfig({ sasToken: value })}
-                placeholder="https://myaccount.blob.core.windows.net/sandiman-vault/vault-encrypted.json?sv=..."
-              />
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label htmlFor="sync-conn">Connection string</Label>
-              <TextareaLike
-                id="sync-conn"
-                value={config.connectionString}
-                onChange={(value) => updateSyncConfig({ connectionString: value })}
-                placeholder="DefaultEndpointsProtocol=https;AccountName=...;AccountKey=..."
-                rows={3}
-              />
-            </div>
-          )}
-
-          {config.kind === 'sas' && !config.sasToken.includes('://') ? (
-            <div className="space-y-2">
-              <Label htmlFor="sync-account">Storage account name</Label>
-              <Input
-                id="sync-account"
-                value={config.accountName}
-                onChange={(event) => updateSyncConfig({ accountName: event.target.value })}
-                placeholder="myaccount"
-              />
-              <p className="text-muted-foreground text-xs">
-                Only needed when using a bare token rather than a full URL.
-              </p>
-            </div>
-          ) : null}
+          <div className="space-y-2">
+            <Label htmlFor="sync-sas-url">Blob SAS URL</Label>
+            <TextareaLike
+              id="sync-sas-url"
+              value={config.sasUrl}
+              onChange={(value) => updateSyncConfig({ sasUrl: value })}
+              placeholder="https://<account>.blob.core.windows.net/?sv=...&sig=..."
+              rows={3}
+            />
+            <p className="text-muted-foreground text-xs">
+              Use a SAS URL with read, write, and lease permissions. Service-scoped
+              URLs also need create permission if the container is missing. Container-
+              or blob-scoped URLs must match the destination, and the container must exist.
+            </p>
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
@@ -289,6 +211,10 @@ export function SyncPanel({
 
             {config.autoSync ? (
               <div className="space-y-2">
+                <p className="text-muted-foreground text-xs">
+                  Automatic sync uses a temporary key after a successful manual sync.
+                  Sync manually once after each unlock to enable it for that session.
+                </p>
                 <Label htmlFor="sync-interval">Every (minutes)</Label>
                 <Input
                   id="sync-interval"
@@ -345,7 +271,7 @@ export function SyncPanel({
               <Button
                 size="sm"
                 onClick={() => void handleSync()}
-                disabled={syncing || missing.length > 0 || passwordDraft.length === 0}
+                disabled={syncing || missing.length > 0}
               >
                 {syncing ? <Loader2 className="animate-spin" /> : <CloudUpload />}
                 Sync now
@@ -380,7 +306,7 @@ export function SyncPanel({
           </Button>
           <Button
             onClick={() => {
-              void setSyncPassword(passwordDraft)
+              setMasterPassword('')
               onOpenChange(false)
               toast.success('Sync settings saved')
             }}
@@ -393,7 +319,7 @@ export function SyncPanel({
   )
 }
 
-/** Multiline credential input, used because SAS URLs and keys are long. */
+/** Multiline credential input, used because SAS URLs are long. */
 function TextareaLike({
   id,
   value,

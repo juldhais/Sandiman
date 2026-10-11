@@ -317,31 +317,13 @@ blob is a pure replica of your data and carries no credential.
 
 ### Credentials
 
-**A SAS token is recommended.** Scope it to one container with a short expiry.
-Either a full blob URL or a bare `?sv=...&sig=...` token works.
-
-**A connection string works, but is weaker.** It embeds the storage account key,
-so anything that can read this browser's storage gets full write access to your
-entire account, not just this vault. The settings panel says so and defaults to
-the SAS option.
-
-There is a wrinkle here: Azure's own `@azure/storage-blob` **browser** bundle
-deliberately omits `StorageSharedKeyCredential` — their docs list Shared Key
-authorization as Node-only. So the two credential kinds take different paths:
-
-| Credential | Path |
-| --- | --- |
-| SAS token | The Azure SDK (`sync/azure.ts`) |
-| Connection string | Hand-rolled Blob REST client with WebCrypto HMAC signing (`sync/sharedKeyTransport.ts`) |
-
-The SDK is imported **dynamically** so it stays out of the main bundle, and
-credential parsing lives in an SDK-free module so the settings panel can
-validate a credential without pulling ~450 kB into the initial load.
-
-> The shared-key path is implemented to spec but has not been exercised against
-> a live storage account. The signing logic is unit-tested; the HTTP round trip
-> is not. If connection-string sync misbehaves, check the request in devtools
-> and fall back to a SAS token.
+**Sync uses a Blob SAS URL.** Create a SAS with read, write, and lease
+permissions, scoped as narrowly as practical, and configure its expiry to match
+your needs. The SAS URL is encrypted in the local vault and is not included in
+the uploaded data. Service-, container-, and blob-scoped URLs are supported;
+container- and blob-scoped URLs must match the configured destination, and the
+container must already exist. A service-scoped URL needs container-create
+permission if Sandiman should create a missing container.
 
 ## Design decisions
 

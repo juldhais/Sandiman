@@ -150,11 +150,11 @@ describe('payload versioning', () => {
     expect(payload.templates.every((template) => template.builtIn)).toBe(true)
   })
 
-  it('strips sync credentials before upload', async () => {
+  it('strips local sync settings before upload', async () => {
     const { toSyncPayload } = await import('@/storage/types')
     const payload: VaultPayload = {
       ...emptyPayload(0),
-      sync: { config: {} as never, password: 'sync-secret' },
+      sync: { config: { sasUrl: 'https://account.blob.core.windows.net/?sig=sync-secret' } as never },
     }
 
     const shared = toSyncPayload(payload)

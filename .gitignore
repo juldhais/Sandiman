@@ -12,7 +12,7 @@ coverage/
 *.tsbuildinfo
 
 # Environment files. This is a password manager, so a stray .env holding a
-# storage connection string would be a real credential leak. `.env.example` is
+# Blob SAS URL would be a real credential leak. `.env.example` is
 # kept because it is a template, not a secret.
 .env
 .env.*

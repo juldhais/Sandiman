@@ -91,6 +91,8 @@ export interface VaultItem extends Syncable {
   /** Field id to value, covering both template fields and template-less items. */
   values: Record<string, string>
   customFields: CustomField[]
+  /** Per-item display order; omitted ids follow their natural template order. */
+  fieldOrder?: string[]
   tags: string[]
   notes: string
 }
@@ -116,17 +118,11 @@ export const DEFAULT_SETTINGS: VaultSettings = {
 }
 
 /**
- * Sync credentials, held inside the master-key-encrypted payload.
- *
- * Keeping the sync password here rather than in a plaintext store means it is
- * protected by the master password at rest. `toSyncPayload` strips this before
- * anything is uploaded, so the password never leaves the device inside the
- * blob.
+ * Azure destination settings, held inside the master-key-encrypted payload.
+ * These are local-only and stripped before anything is uploaded.
  */
-export interface StoredSyncCredentials {
+export interface StoredSyncSettings {
   config: AzureSyncConfig
-  /** Master-protected, but never uploaded. */
-  password: string
 }
 
 /** The decrypted vault body, encrypted into a single envelope. */
@@ -137,7 +133,7 @@ export interface VaultPayload {
   settings: VaultSettings
   updatedAt: number
   /** Local-only; stripped before sync. */
-  sync?: StoredSyncCredentials
+  sync?: StoredSyncSettings
 }
 
 /** Payload version, bumped when the item/template shape changes incompatibly. */
@@ -146,8 +142,7 @@ export const VAULT_PAYLOAD_VERSION = 1
 /**
  * Projects the vault body onto the subset shared with other devices.
  *
- * Sync credentials are excluded so the uploaded blob is a pure replica of the
- * user's data and carries nothing that could weaken the sync key.
+ * Azure configuration is excluded so no SAS URL reaches the blob.
  */
 export function toSyncPayload(payload: VaultPayload): Omit<VaultPayload, 'sync'> {
   const { sync: _sync, ...shared } = payload

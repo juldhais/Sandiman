@@ -17,8 +17,9 @@ import { DecryptError } from '@/crypto/aes'
 import { cancelPendingClear } from '@/lib/clipboard'
 import { newId } from '@/lib/id'
 import { createBuiltinTemplates, isBuiltinTemplateId } from '@/storage/builtins'
+import { clearSyncSessionKey } from '@/sync/syncEngine'
 import {
-  collectValues,
+  removeItemFields,
   resolveFields,
   suggestTitle,
   touchItem,
@@ -31,6 +32,7 @@ import {
   type VaultPayload,
   type VaultSettings,
   type VaultTemplate,
+  type CustomField,
 } from '@/storage/types'
 import {
   WrongPasswordError,
@@ -61,7 +63,7 @@ export interface VaultStore {
   deletedItems: VaultItem[]
   templates: VaultTemplate[]
   settings: VaultSettings
-  sync: { config: AzureSyncConfig; password: string }
+  sync: { config: AzureSyncConfig }
 
   /** True while a write is in flight; the shell uses this for the save indicator. */
   saving: boolean
@@ -88,6 +90,9 @@ export interface VaultStore {
     title: string,
     tags: string[],
     notes: string,
+    customFields: CustomField[],
+    fieldOrder: string[],
+    removedFieldIds: string[],
   ) => Promise<void>
   deleteItem: (id: string) => Promise<void>
   restoreItem: (id: string) => Promise<void>
@@ -101,7 +106,6 @@ export interface VaultStore {
 
   updateSettings: (changes: Partial<VaultSettings>) => Promise<void>
   updateSyncConfig: (changes: Partial<AzureSyncConfig>) => Promise<void>
-  setSyncPassword: (password: string) => Promise<void>
 
   /** Replaces the whole payload, used by the sync merge. */
   applyMergedPayload: (payload: VaultPayload) => Promise<void>
@@ -123,6 +127,7 @@ function hasSession(): boolean {
 function clearSession(): void {
   masterKey = null
   masterKdf = null
+  clearSyncSessionKey()
   cancelPendingClear()
 }
 
@@ -134,7 +139,7 @@ function toPayload(state: VaultStore): VaultPayload {
     templates: state.templates,
     settings: state.settings,
     updatedAt: Date.now(),
-    sync: { config: state.sync.config, password: state.sync.password },
+    sync: { config: state.sync.config },
   }
 }
 
@@ -174,7 +179,6 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
       settings: { ...DEFAULT_SETTINGS, ...payload.settings },
       sync: {
         config: { ...DEFAULT_AZURE_SYNC_CONFIG, ...(payload.sync?.config ?? {}) },
-        password: payload.sync?.password ?? '',
       },
       screen: 'vault',
     })
@@ -198,7 +202,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
     deletedItems: [],
     templates: [],
     settings: { ...DEFAULT_SETTINGS },
-    sync: { config: { ...DEFAULT_AZURE_SYNC_CONFIG }, password: '' },
+    sync: { config: { ...DEFAULT_AZURE_SYNC_CONFIG } },
     saving: false,
     busy: false,
     error: null,
@@ -268,7 +272,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
       set({
         screen: 'unlock',
         items: [],
-        sync: { config: { ...DEFAULT_AZURE_SYNC_CONFIG }, password: '' },
+        sync: { config: { ...DEFAULT_AZURE_SYNC_CONFIG } },
         error: null,
         saving: false,
       })
@@ -288,24 +292,54 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
       await persist()
     },
 
-    async saveItemFromForm(item, template, input, title, tags, notes) {
+    async saveItemFromForm(
+      item,
+      template,
+      input,
+      title,
+      tags,
+      notes,
+      customFields,
+      fieldOrder,
+      removedFieldIds,
+    ) {
       const resolved = resolveFields(item, template)
+      const removedIds = new Set(removedFieldIds)
       set((state) => ({
-        items: state.items.map((existing) =>
-          existing.id === item.id
-            ? touchItem({
-                ...existing,
-                title: title.trim() || suggestTitle(resolved),
-                values: collectValues(resolved, input),
-                customFields: existing.customFields.map((custom) => ({
-                  ...custom,
-                  value: typeof input[custom.id] === 'string' ? (input[custom.id] as string) : '',
-                })),
-                tags,
-                notes,
-              })
-            : existing,
-        ),
+        items: state.items.map((existing) => {
+          if (existing.id !== item.id) return existing
+
+          // Removing a field in this item editor is an explicit request to
+          // erase its value on save. Template-level edits remain non-destructive.
+          const retained = removeItemFields(existing, removedFieldIds)
+          const values = { ...retained.values }
+          for (const field of resolved) {
+            if (field.custom || removedIds.has(field.id)) continue
+            const value = input[field.id]
+            if (typeof value === 'string' && value.length > 0) values[field.id] = value
+            else delete values[field.id]
+          }
+          for (const custom of customFields) delete values[custom.id]
+
+          return touchItem({
+            ...existing,
+            templateId: template?.id ?? null,
+            title: title.trim() || suggestTitle(resolved),
+            values,
+            customFields: customFields
+              .filter((custom) => !removedIds.has(custom.id))
+              .map((custom) => ({
+                ...custom,
+                value:
+                  typeof input[custom.id] === 'string'
+                    ? (input[custom.id] as string)
+                    : custom.value,
+              })),
+            fieldOrder: fieldOrder.filter((id) => !removedIds.has(id)),
+            tags,
+            notes,
+          })
+        }),
       }))
       await persist()
     },
@@ -407,11 +441,6 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
 
     async updateSyncConfig(changes) {
       set((state) => ({ sync: { ...state.sync, config: { ...state.sync.config, ...changes } } }))
-      await persist()
-    },
-
-    async setSyncPassword(password) {
-      set((state) => ({ sync: { ...state.sync, password } }))
       await persist()
     },
 

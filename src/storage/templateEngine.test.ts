@@ -4,6 +4,7 @@ import {
   buildFieldSchema,
   collectValues,
   createItem,
+  removeItemFields,
   resolveFields,
   suggestTitle,
 } from '@/storage/templateEngine'
@@ -43,6 +44,44 @@ describe('resolveFields', () => {
   it('follows template field order', () => {
     const resolved = resolveFields(loginItem(), loginTemplate)
     expect(resolved.map((f) => f.id)).toEqual(loginTemplate.fields.map((f) => f.id))
+  })
+
+  it('applies per-item field order', () => {
+    const item: VaultItem = {
+      ...loginItem({ username: 'alice', password: 'secret' }),
+      fieldOrder: ['password', 'username'],
+    }
+
+    const visible = resolveFields(item, loginTemplate)
+    expect(visible.map((field) => field.id)).toEqual([
+      'password',
+      'username',
+      ...loginTemplate.fields.map((field) => field.id).filter((id) => id !== 'password' && id !== 'username'),
+    ])
+  })
+
+  it('permanently removes explicitly removed field values and custom fields', () => {
+    const item: VaultItem = {
+      ...loginItem({ username: 'alice', password: 'secret', url: 'https://example.test' }),
+      fieldOrder: ['password', 'username', 'url'],
+      customFields: [
+        {
+          id: 'custom-note',
+          label: 'Private note',
+          type: 'text',
+          required: false,
+          copyable: false,
+          expiry: false,
+          value: 'remove me',
+        },
+      ],
+    }
+
+    const result = removeItemFields(item, ['password', 'custom-note'])
+
+    expect(result.values).toEqual({ username: 'alice', url: 'https://example.test' })
+    expect(result.customFields).toEqual([])
+    expect(result.fieldOrder).toEqual(['username', 'url'])
   })
 
   it('surfaces values whose field was removed from the template', () => {

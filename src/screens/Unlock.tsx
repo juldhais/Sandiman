@@ -78,7 +78,6 @@ export function Unlock() {
             type="submit"
             className="w-full"
             disabled={password.length === 0}
-            loading={busy}
           >
             {busy ? <Loader2 className="animate-spin" /> : <Lock />}
             {busy ? 'Deriving key' : 'Unlock'}

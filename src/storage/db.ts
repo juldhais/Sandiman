@@ -9,8 +9,7 @@
  *    timestamps. The salt and iteration count are not secret; the ciphertext
  *    is. Nothing here reveals vault contents.
  *
- * The sync password is never stored unencrypted: it lives inside the
- * master-key-encrypted payload.
+ * Azure sync configuration is stored inside the master-key-encrypted payload.
  */
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { Envelope } from '@/crypto/envelope'

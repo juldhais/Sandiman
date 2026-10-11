@@ -67,7 +67,6 @@ export function emptyPayload(now: number = Date.now()): VaultPayload {
     updatedAt: now,
     sync: {
       config: { ...DEFAULT_AZURE_SYNC_CONFIG },
-      password: '',
     },
   }
 }
@@ -112,6 +111,21 @@ export async function deriveMasterKey(
   if (!envelope) return null
   const derived = await deriveKey(password, envelope.kdf)
   return { key: derived.key, kdf: envelope.kdf, elapsedMs: derived.elapsedMs }
+}
+
+/** Verifies a freshly entered password without changing the unlocked session. */
+export async function verifyMasterPassword(password: string): Promise<boolean> {
+  const envelope = await readEnvelope()
+  if (!envelope) return false
+
+  const { key } = await deriveKey(password, envelope.kdf)
+  try {
+    await decryptVault(envelope, key)
+    return true
+  } catch (cause) {
+    if (cause instanceof DecryptError && cause.reason === 'wrong-password') return false
+    throw cause
+  }
 }
 
 /**

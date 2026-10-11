@@ -73,6 +73,10 @@ export function Sidebar({
     return counts
   }, [items])
 
+  const templatesWithItems = liveTemplates.filter(
+    (template) => (countsByTemplate.get(template.id) ?? 0) > 0,
+  )
+
   const tags = useMemo(() => {
     const seen = new Map<string, number>()
     for (const item of items) {
@@ -153,7 +157,7 @@ export function Sidebar({
             Templates
           </p>
 
-          {liveTemplates.map((template) => (
+          {templatesWithItems.map((template) => (
             <NavItem
               key={template.id}
               iconNode={<TemplateIcon icon={template.icon} className="size-4" />}
@@ -174,6 +178,11 @@ export function Sidebar({
             />
           ) : null}
 
+        </NavGroup>
+
+        <Separator className="my-2" />
+
+        <NavGroup>
           <li>
             <Button
               variant="ghost"

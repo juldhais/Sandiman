@@ -163,9 +163,8 @@ export interface PayloadMergeResult {
 /**
  * Merges the shareable portion of two payloads.
  *
- * Sync credentials are excluded by construction: `VaultPayload['sync']` is
- * local-only, so neither side of a merge can leak its own sync password to the
- * other.
+ * Azure configuration is excluded by construction: `VaultPayload['sync']` is
+ * local-only, so neither side of a merge can leak its SAS URL.
  */
 export function mergePayloads(
   local: VaultPayload,
@@ -199,4 +198,3 @@ export function mergePayloads(
     diverged,
   }
 }
-

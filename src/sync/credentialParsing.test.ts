@@ -1,218 +1,103 @@
 import { describe, expect, it } from 'vitest'
+import { createBlobHandle } from '@/sync/azure'
 import {
   CredentialError,
   describeCredential,
-  parseConnectionString,
   parseSasUrl,
   readAccountName,
 } from '@/sync/credentialParsing'
-import { buildStringToSign, type SharedKeyTarget } from '@/sync/sharedKeyTransport'
 
-const CONNECTION_STRING =
-  'DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=YWJjZA==;EndpointSuffix=core.windows.net'
+const SAS_URL = 'https://myaccount.blob.core.windows.net/?sv=2021-12-02&sig=YWJj'
 
-describe('parseConnectionString', () => {
-  it('reads the fields regardless of order', () => {
-    const parsed = parseConnectionString(
-      'AccountKey=YWJjZA==;AccountName=myaccount;DefaultEndpointsProtocol=https',
-    )
+const config = {
+  sasUrl: SAS_URL,
+  containerName: 'vault-container',
+  blobName: 'vault.json',
+  autoSync: false,
+  autoSyncMinutes: 5,
+}
+
+describe('parseSasUrl', () => {
+  it('reads a service SAS URL', () => {
+    const parsed = parseSasUrl(SAS_URL, config)
 
     expect(parsed.accountName).toBe('myaccount')
-    expect(parsed.accountKey).toBe('YWJjZA==')
+    expect(parsed.scope).toBe('service')
   })
 
-  it('builds the endpoint from the account name', () => {
-    const parsed = parseConnectionString(CONNECTION_STRING)
-    expect(parsed.endpoint).toBe('https://myaccount.blob.core.windows.net')
+  it('accepts a container SAS URL matching the configured container', () => {
+    const parsed = parseSasUrl(
+      'https://myaccount.blob.core.windows.net/vault-container?sv=2021-12-02&sig=YWJj',
+      config,
+    )
+
+    expect(parsed.scope).toBe('container')
   })
 
-  it('rejects a connection string with no account key', () => {
-    expect(() => parseConnectionString('AccountName=myaccount')).toThrow(CredentialError)
+  it('accepts a blob SAS URL matching the configured blob', () => {
+    const parsed = parseSasUrl(
+      'https://myaccount.blob.core.windows.net/vault-container/vault.json?sv=2021-12-02&sig=YWJj',
+      config,
+    )
+
+    expect(parsed.scope).toBe('blob')
+  })
+
+  it('rejects URLs without SAS query parameters', () => {
+    expect(() => parseSasUrl('https://myaccount.blob.core.windows.net/', config)).toThrow(
+      /SAS URL/i,
+    )
+  })
+
+  it('rejects a path that conflicts with the configured blob', () => {
+    expect(() =>
+      parseSasUrl(
+        'https://myaccount.blob.core.windows.net/vault-container/other.json?sv=2021-12-02&sig=YWJj',
+        config,
+      ),
+    ).toThrow(/does not match/i)
   })
 
   it('rejects an empty string', () => {
-    expect(() => parseConnectionString('   ')).toThrow(CredentialError)
-  })
-})
-
-describe('parseSasUrl', () => {
-  const url =
-    'https://myaccount.blob.core.windows.net/sandiman-vault/vault-encrypted.json?sv=2021-12-02&sig=abc123%2Fdef'
-
-  it('extracts account, container, and blob name', () => {
-    const parsed = parseSasUrl(url)
-
-    expect(parsed.accountName).toBe('myaccount')
-    expect(parsed.container).toBe('sandiman-vault')
-    expect(parsed.blob).toBe('vault-encrypted.json')
-  })
-
-  it('preserves the query string intact', () => {
-    const parsed = parseSasUrl(url)
-    expect(parsed.sasToken).toContain('sig=abc123%2Fdef')
-  })
-
-  it('accepts a bare token', () => {
-    const parsed = parseSasUrl('?sv=2021-12-02&sig=abc')
-
-    expect(parsed.sasToken).toBe('?sv=2021-12-02&sig=abc')
-    expect(parsed.endpoint).toBe('')
-  })
-
-  it('rejects a token with no signature', () => {
-    expect(() => parseSasUrl('?sv=2021-12-02')).toThrow(CredentialError)
-  })
-
-  it('rejects a URL with no signature', () => {
-    expect(() => parseSasUrl('https://a.blob.core.windows.net/c/b?sv=2021')).toThrow(
-      CredentialError,
-    )
+    expect(() => parseSasUrl('   ', config)).toThrow(CredentialError)
   })
 })
 
 describe('readAccountName', () => {
-  it('prefers an explicitly configured account', () => {
-    expect(readAccountName({ kind: 'sas', accountName: 'explicit', email: '', sasToken: '?sig=x', connectionString: '', containerName: 'c', blobName: 'b', autoSync: false, autoSyncMinutes: 5 })).toBe('explicit')
-  })
-
-  it('derives the account from a connection string', () => {
-    const account = readAccountName({
-      kind: 'connection-string',
-      accountName: '',
-      email: '',
-      sasToken: '',
-      connectionString: CONNECTION_STRING,
-      containerName: 'c',
-      blobName: 'b',
-      autoSync: false,
-      autoSyncMinutes: 5,
-    })
-
-    expect(account).toBe('myaccount')
+  it('derives the account from the SAS endpoint', () => {
+    expect(readAccountName(config)).toBe('myaccount')
   })
 
   it('returns empty rather than throwing on a broken credential', () => {
-    expect(readAccountName({ kind: 'connection-string', accountName: '', email: '', sasToken: '', connectionString: 'nonsense', containerName: 'c', blobName: 'b', autoSync: false, autoSyncMinutes: 5 })).toBe('')
+    expect(readAccountName({ ...config, sasUrl: 'nonsense' })).toBe('')
   })
 })
 
 describe('describeCredential', () => {
-  it('reports a readable connection string', () => {
-    const result = describeCredential({
-      kind: 'connection-string',
-      accountName: '',
-      email: 'a@b.c',
-      sasToken: '',
-      connectionString: CONNECTION_STRING,
-      containerName: 'c',
-      blobName: 'b',
-      autoSync: false,
-      autoSyncMinutes: 5,
-    })
-
+  it('reports a readable SAS URL', () => {
+    const result = describeCredential(config)
     expect(result.ok).toBe(true)
     expect(result.summary).toContain('myaccount')
   })
 
-  it('never echoes the account key', () => {
-    const result = describeCredential({
-      kind: 'connection-string',
-      accountName: '',
-      email: '',
-      sasToken: '',
-      connectionString: CONNECTION_STRING,
-      containerName: 'c',
-      blobName: 'b',
-      autoSync: false,
-      autoSyncMinutes: 5,
-    })
-
-    expect(result.summary).not.toContain('YWJjZA==')
+  it('never echoes the SAS token', () => {
+    const result = describeCredential(config)
+    expect(result.summary).not.toContain('YWJj')
   })
 
-  it('reports an unreadable credential as not ok', () => {
-    const result = describeCredential({
-      kind: 'sas',
-      accountName: '',
-      email: '',
-      sasToken: 'not-a-token',
-      connectionString: '',
-      containerName: 'c',
-      blobName: 'b',
-      autoSync: false,
-      autoSyncMinutes: 5,
-    })
-
+  it('reports an unsupported account-key credential as not ok', () => {
+    const result = describeCredential({ ...config, sasUrl: 'https://myaccount.blob.core.windows.net/' })
     expect(result.ok).toBe(false)
   })
 })
 
-describe('buildStringToSign', () => {
-  const target: SharedKeyTarget = {
-    accountName: 'myaccount',
-    accountKey: 'YWJjZA==',
-    endpoint: 'https://myaccount.blob.core.windows.net',
-    container: 'sandiman-vault',
-    blob: 'vault.json',
-  }
+describe('createBlobHandle', () => {
+  it('constructs the official Azure SDK clients from the SAS URL', () => {
+    const { handle, parsed } = createBlobHandle(config)
 
-  it('starts with the method and signs the resource path', () => {
-    const headers = new Headers({ 'x-ms-date': 'Mon, 01 Jan 2026 00:00:00 GMT' })
-    const signed = buildStringToSign('PUT', headers, 0, target)
-
-    expect(signed.startsWith('PUT\n')).toBe(true)
-    expect(signed.endsWith('/myaccount/sandiman-vault/vault.json')).toBe(true)
-  })
-
-  it('signs x-ms headers in sorted, lowercased order', () => {
-    const headers = new Headers({
-      'x-ms-version': '2021-12-02',
-      'x-ms-date': 'Mon, 01 Jan 2026 00:00:00 GMT',
-      'x-ms-lease-id': 'lease-1',
-    })
-
-    const signed = buildStringToSign('PUT', headers, 0, target)
-
-    const dateIndex = signed.indexOf('x-ms-date:')
-    const leaseIndex = signed.indexOf('x-ms-lease-id:')
-    const versionIndex = signed.indexOf('x-ms-version:')
-
-    // Sorted alphabetically: date < lease-id < version.
-    expect(dateIndex).toBeLessThan(leaseIndex)
-    expect(leaseIndex).toBeLessThan(versionIndex)
-  })
-
-  it('treats a zero content length as an empty string', () => {
-    const headers = new Headers()
-    const signed = buildStringToSign('GET', headers, 0, target)
-
-    // Method, then an empty encoding/language/length/md5/type/date run.
-    expect(signed).toContain('GET\n\n\n\n\n\n')
-  })
-
-  it('includes a non-zero content length', () => {
-    const headers = new Headers()
-    expect(buildStringToSign('PUT', headers, 42, target)).toContain('\n42\n')
-  })
-
-  it('signs container-level requests without the blob segment', () => {
-    const headers = new Headers()
-    const signed = buildStringToSign(
-      'PUT',
-      headers,
-      0,
-      target,
-      '/myaccount/sandiman-vault',
-    )
-
-    expect(signed.endsWith('/myaccount/sandiman-vault')).toBe(true)
-  })
-
-  it('is deterministic for the same inputs', () => {
-    const headers = new Headers({ 'x-ms-date': 'Mon, 01 Jan 2026 00:00:00 GMT' })
-    const a = buildStringToSign('PUT', headers, 10, target)
-    const b = buildStringToSign('PUT', headers, 10, target)
-
-    expect(a).toBe(b)
+    expect(parsed.accountName).toBe('myaccount')
+    expect(typeof handle.containerExists).toBe('function')
+    expect(typeof handle.download).toBe('function')
+    expect(typeof handle.acquireLease).toBe('function')
   })
 })

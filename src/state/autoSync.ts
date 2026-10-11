@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useRef } from 'react'
 import { toast } from 'sonner'
-import { SyncError, runSync } from '@/sync/syncEngine'
+import { hasSyncSessionKey, SyncError, runSync } from '@/sync/syncEngine'
 import { isSyncConfigured } from '@/sync/types'
 import { useVaultStore } from './vaultStore'
 import { VAULT_PAYLOAD_VERSION, type VaultPayload } from '@/storage/types'
@@ -15,7 +15,6 @@ import { VAULT_PAYLOAD_VERSION, type VaultPayload } from '@/storage/types'
 export function useAutoSync(): void {
   const screen = useVaultStore((state) => state.screen)
   const config = useVaultStore((state) => state.sync.config)
-  const syncPassword = useVaultStore((state) => state.sync.password)
   const settings = useVaultStore((state) => state.settings)
   const items = useVaultStore((state) => state.items)
   const deletedItems = useVaultStore((state) => state.deletedItems)
@@ -25,10 +24,10 @@ export function useAutoSync(): void {
 
   const runningRef = useRef(false)
 
-  const enabled = screen === 'vault' && config.autoSync && isSyncConfigured(config) && syncPassword.length > 0
+  const enabled = screen === 'vault' && config.autoSync && isSyncConfigured(config)
 
   const sync = useCallback(async () => {
-    if (runningRef.current) return
+    if (runningRef.current || !hasSyncSessionKey()) return
     runningRef.current = true
     try {
       const payload: VaultPayload = {
@@ -37,12 +36,12 @@ export function useAutoSync(): void {
         templates,
         settings,
         updatedAt: Date.now(),
-        sync: { config, password: syncPassword },
+        sync: { config },
       }
 
-      const result = await runSync({ config, syncPassword, payload })
+      const result = await runSync({ config, payload })
 
-      await applyMergedPayload({ ...result.mergedPayload, sync: { config, password: syncPassword } })
+      await applyMergedPayload({ ...result.mergedPayload, sync: { config } })
       await updateSettings({ lastSyncAt: result.outcome.completedAt })
     } catch (cause) {
       // Background failures are surfaced once and then ignored: repeating a
@@ -56,7 +55,7 @@ export function useAutoSync(): void {
     } finally {
       runningRef.current = false
     }
-  }, [applyMergedPayload, config, deletedItems, items, settings, syncPassword, templates, updateSettings])
+  }, [applyMergedPayload, config, deletedItems, items, settings, templates, updateSettings])
 
   useEffect(() => {
     if (!enabled) return

@@ -21,8 +21,8 @@ const ACTIVITY_EVENTS = [
 ] as const
 
 export function useAutoLock(): void {
-  const autoLockMinutes = useVaultLockSettings().autoLockMinutes
-  const lockOnBlur = useVaultLockSettings().lockOnBlur
+  const autoLockMinutes = useVaultStore((state) => state.settings.autoLockMinutes)
+  const lockOnBlur = useVaultStore((state) => state.settings.lockOnBlur)
   const lock = useVaultStore((state) => state.lock)
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -67,14 +67,6 @@ export function useAutoLock(): void {
     window.addEventListener('blur', onBlur)
     return () => window.removeEventListener('blur', onBlur)
   }, [lockOnBlur])
-}
-
-/** Reads the two lock-related settings in a single subscription. */
-function useVaultLockSettings(): { autoLockMinutes: number; lockOnBlur: boolean } {
-  return useVaultStore((state) => ({
-    autoLockMinutes: state.settings.autoLockMinutes,
-    lockOnBlur: state.settings.lockOnBlur,
-  }))
 }
 
 /** Locks the vault when the tab is hidden for an extended period. */

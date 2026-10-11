@@ -60,6 +60,7 @@ export const itemSchema = z.object({
   title: z.string().catch(''),
   values: z.record(z.string(), z.string()).catch({}),
   customFields: z.array(customFieldSchema).catch([]),
+  fieldOrder: z.array(z.string()).catch([]).optional(),
   tags: z.array(z.string()).catch([]),
   notes: z.string().catch(''),
   createdAt: epochMs(0),
@@ -79,21 +80,16 @@ export const settingsSchema = z
 
 export const azureSyncConfigSchema = z
   .object({
-    kind: z.enum(['sas', 'connection-string']).catch(DEFAULT_AZURE_SYNC_CONFIG.kind),
     containerName: z.string().min(1).catch(DEFAULT_AZURE_SYNC_CONFIG.containerName),
     blobName: z.string().min(1).catch(DEFAULT_AZURE_SYNC_CONFIG.blobName),
-    sasToken: z.string().catch(''),
-    connectionString: z.string().catch(''),
-    accountName: z.string().catch(''),
-    email: z.string().catch(''),
+    sasUrl: z.string().catch(''),
     autoSync: z.boolean().catch(false),
     autoSyncMinutes: z.number().int().min(1).max(1440).catch(DEFAULT_AZURE_SYNC_CONFIG.autoSyncMinutes),
   })
   .catch(DEFAULT_AZURE_SYNC_CONFIG)
 
-export const storedSyncCredentialsSchema = z.object({
+export const storedSyncSettingsSchema = z.object({
   config: azureSyncConfigSchema,
-  password: z.string().catch(''),
 })
 
 export const vaultPayloadSchema = z.object({
@@ -102,7 +98,7 @@ export const vaultPayloadSchema = z.object({
   templates: z.array(templateSchema).catch([]),
   settings: settingsSchema,
   updatedAt: epochMs(0),
-  sync: storedSyncCredentialsSchema.optional(),
+  sync: storedSyncSettingsSchema.optional(),
 })
 
 export type ParsedVaultPayload = z.infer<typeof vaultPayloadSchema>

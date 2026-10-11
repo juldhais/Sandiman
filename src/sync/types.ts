@@ -1,26 +1,16 @@
 /**
  * Azure Blob Storage sync configuration.
  *
- * Note what is *not* here: the sync password is deliberately absent. It is
- * kept inside the master-key-encrypted vault payload instead, so it is never
- * part of the blob uploaded to Azure and never sits in plaintext storage.
+ * Only the Azure destination and SAS URL are stored. Remote data is
+ * encrypted with a key derived from the vault master password.
  */
-export type SyncCredentialKind = 'sas' | 'connection-string'
-
 export interface AzureSyncConfig {
-  kind: SyncCredentialKind
-  /** Container to read and write. Created on demand if absent. */
+  /** Container to read and write. Service-scoped SAS URLs can create it if absent. */
   containerName: string
   /** Blob holding the encrypted envelope. */
   blobName: string
-  /** SAS token or URL. Present when `kind === 'sas'`. */
-  sasToken: string
-  /** Storage account connection string. Present when `kind === 'connection-string'`. */
-  connectionString: string
-  /** Account key parsed out of the connection string, for the settings UI. */
-  accountName: string
-  /** Identifies the sync key derivation; stored in the blob's KDF descriptor. */
-  email: string
+  /** Full Azure Blob SAS URL, encrypted with the local vault. */
+  sasUrl: string
   /** Enable background sync on an interval. */
   autoSync: boolean
   autoSyncMinutes: number
@@ -30,26 +20,17 @@ export const DEFAULT_BLOB_NAME = 'vault-encrypted.json'
 export const DEFAULT_CONTAINER_NAME = 'sandiman-vault'
 
 export const DEFAULT_AZURE_SYNC_CONFIG: AzureSyncConfig = {
-  kind: 'sas',
   containerName: DEFAULT_CONTAINER_NAME,
   blobName: DEFAULT_BLOB_NAME,
-  sasToken: '',
-  connectionString: '',
-  accountName: '',
-  email: '',
+  sasUrl: '',
   autoSync: false,
   autoSyncMinutes: 5,
 }
 
-/** A sync credential is incomplete if any of these are blank. */
+/** Sync is incomplete if any Azure destination credential is blank. */
 export function missingSyncFields(config: AzureSyncConfig): string[] {
   const missing: string[] = []
-  if (!config.email.trim()) missing.push('Sync email')
-  if (config.kind === 'sas') {
-    if (!config.sasToken.trim()) missing.push('SAS token')
-  } else if (!config.connectionString.trim()) {
-    missing.push('Connection string')
-  }
+  if (!config.sasUrl.trim()) missing.push('Blob SAS URL')
   if (!config.containerName.trim()) missing.push('Container name')
   if (!config.blobName.trim()) missing.push('Blob name')
   return missing

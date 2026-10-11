@@ -194,9 +194,9 @@ describe('mergePayloads', () => {
     expect(ids(second)).toEqual(ids(first))
   })
 
-  it('never carries sync credentials into the result', () => {
-    const local = { ...payload([], [], 100), sync: { config: {} as never, password: 'local-secret' } }
-    const remote = { ...payload([], [], 100), sync: { config: {} as never, password: 'remote-secret' } }
+  it('never carries local sync settings into the result', () => {
+    const local = { ...payload([], [], 100), sync: { config: { sasUrl: 'local-secret' } as never } }
+    const remote = { ...payload([], [], 100), sync: { config: { sasUrl: 'remote-secret' } as never } }
 
     const result = mergePayloads(local, remote)
 

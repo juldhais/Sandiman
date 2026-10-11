@@ -38,13 +38,15 @@ function isBlank(value: string): boolean {
 /**
  * Flattens an item into the ordered field list to render.
  *
- * Order is: template fields in template order, then orphaned template values,
- * then ad-hoc custom fields. Orphans come before customs because they are
- * older data the user is more likely to still care about.
+ * Default order is template fields, orphaned template values, then ad-hoc
+ * custom fields. Per-item ordering is applied after resolution. Orphans come
+ * before customs because they are older data the user is more likely to still
+ * care about.
  */
 export function resolveFields(item: VaultItem, template: VaultTemplate | null): ResolvedField[] {
   const resolved: ResolvedField[] = []
   const declaredIds = new Set<string>()
+  const customIds = new Set(item.customFields.map((field) => field.id))
 
   if (template) {
     for (const def of template.fields) {
@@ -62,7 +64,7 @@ export function resolveFields(item: VaultItem, template: VaultTemplate | null): 
   // Values whose field was removed from the template. Surfaced rather than
   // dropped, so editing a template is never destructive.
   for (const [fieldId, value] of Object.entries(item.values)) {
-    if (declaredIds.has(fieldId)) continue
+    if (declaredIds.has(fieldId) || customIds.has(fieldId)) continue
     resolved.push({
       id: fieldId,
       def: {
@@ -89,7 +91,35 @@ export function resolveFields(item: VaultItem, template: VaultTemplate | null): 
     })
   }
 
+  const order = new Map((item.fieldOrder ?? []).map((id, index) => [id, index]))
+
   return resolved
+    .map((field, index) => ({ field, index }))
+    .sort((a, b) => {
+      const aOrder = order.get(a.field.id)
+      const bOrder = order.get(b.field.id)
+      if (aOrder === undefined && bOrder === undefined) return a.index - b.index
+      if (aOrder === undefined) return 1
+      if (bOrder === undefined) return -1
+      return aOrder - bOrder || a.index - b.index
+    })
+    .map(({ field }) => field)
+}
+
+/** Permanently removes selected fields and their values from one item. */
+export function removeItemFields(item: VaultItem, fieldIds: readonly string[]): VaultItem {
+  if (fieldIds.length === 0) return item
+
+  const removedIds = new Set(fieldIds)
+  const values = { ...item.values }
+  for (const id of removedIds) delete values[id]
+
+  return {
+    ...item,
+    values,
+    customFields: item.customFields.filter((field) => !removedIds.has(field.id)),
+    fieldOrder: item.fieldOrder?.filter((id) => !removedIds.has(id)),
+  }
 }
 
 /** Fields worth showing in a detail view: anything with content. */

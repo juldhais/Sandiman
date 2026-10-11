@@ -294,6 +294,11 @@ export function Vault() {
       </Sheet>
 
       <ItemForm
+        key={
+          formState.open
+            ? (formState.item?.id ?? `new-${formState.templateId ?? 'default'}`)
+            : 'closed'
+        }
         open={formState.open}
         onOpenChange={(open) => {
           if (!open) setFormState({ open: false })
