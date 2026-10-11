@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Test and tooling output
+coverage/
+.vitest/
+*.tsbuildinfo
+
+# Environment files. This is a password manager, so a stray .env holding a
+# storage connection string would be a real credential leak. `.env.example` is
+# kept because it is a template, not a secret.
+.env
+.env.*
+!.env.example
+
+# Editor and IDE state
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Windows and project files
+*.suo
+*.ntvs*
+*.njsproj
+*.sln

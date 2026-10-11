@@ -1,0 +1,14 @@
+# Normalise line endings so the repository stores LF regardless of who commits.
+# Without this, Git on Windows rewrites every file to CRLF on checkout and back
+# on commit, which produces whole-file diffs and noisy warnings on every command.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending translated.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
