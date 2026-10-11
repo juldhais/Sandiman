@@ -4,6 +4,7 @@ import {
   checkOptions,
   estimateStrength,
   generatePassword,
+  optionsForPasswordType,
   type GeneratorOptions,
 } from '@/generator/password'
 
@@ -12,6 +13,10 @@ function options(overrides: Partial<GeneratorOptions> = {}): GeneratorOptions {
 }
 
 describe('generatePassword', () => {
+  it('defaults to 16 characters', () => {
+    expect(DEFAULT_GENERATOR_OPTIONS.length).toBe(16)
+  })
+
   it('produces the requested length', () => {
     expect(generatePassword(options({ length: 32 }))).toHaveLength(32)
   })
@@ -85,6 +90,10 @@ describe('generatePassword', () => {
   it('allows a short length when coverage is not required', () => {
     expect(generatePassword(options({ length: 4, requireEachSet: false }))).toHaveLength(4)
   })
+
+  it('supports lengths above the slider limit when configured directly', () => {
+    expect(generatePassword(options({ length: 80 }))).toHaveLength(80)
+  })
 })
 
 describe('checkOptions', () => {
@@ -92,6 +101,10 @@ describe('checkOptions', () => {
     const result = checkOptions(options({ length: 3, requireEachSet: true }))
     expect(result.error).toBe('length-too-short')
     expect(result.minimumLength).toBe(4)
+  })
+
+  it('requires a whole-number length', () => {
+    expect(checkOptions(options({ length: 4.5 })).error).toBe('invalid-length')
   })
 
   it('reports an empty character pool', () => {
@@ -103,6 +116,49 @@ describe('checkOptions', () => {
 
   it('accepts valid options', () => {
     expect(checkOptions(options()).error).toBeNull()
+  })
+})
+
+describe('optionsForPasswordType', () => {
+  it('selects letters and numbers without symbols', () => {
+    expect(optionsForPasswordType(options(), 'letters-and-numbers')).toMatchObject({
+      lowercase: true,
+      uppercase: true,
+      digits: true,
+      symbols: false,
+    })
+  })
+
+  it('selects letters only', () => {
+    expect(optionsForPasswordType(options(), 'letters-only')).toMatchObject({
+      lowercase: true,
+      uppercase: true,
+      digits: false,
+      symbols: false,
+    })
+  })
+
+  it('selects numbers only', () => {
+    expect(optionsForPasswordType(options(), 'numbers-only')).toMatchObject({
+      lowercase: false,
+      uppercase: false,
+      digits: true,
+      symbols: false,
+    })
+  })
+
+  it('selects all character sets for random passwords', () => {
+    expect(optionsForPasswordType(options(), 'random')).toMatchObject({
+      lowercase: true,
+      uppercase: true,
+      digits: true,
+      symbols: true,
+    })
+  })
+
+  it('preserves length and advanced options', () => {
+    expect(optionsForPasswordType(options({ length: 32, excludeAmbiguous: true }), 'letters-only'))
+      .toMatchObject({ length: 32, excludeAmbiguous: true })
   })
 })
 

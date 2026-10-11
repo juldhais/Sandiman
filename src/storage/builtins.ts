@@ -31,12 +31,6 @@ export const LOGIN_FIELDS: FieldDef[] = [
   field('username', 'Username', 'text', { copyable: true }),
   field('password', 'Password', 'masked', { required: true, copyable: true }),
   field('url', 'Website URL', 'url'),
-  field('totpSecret', 'TOTP Secret', 'masked', {
-    copyable: true,
-    placeholder: 'Base32 secret used for authenticator codes',
-  }),
-  field('totpIssuer', 'TOTP Issuer', 'text'),
-  field('recoveryCodes', 'Recovery Codes', 'note'),
 ]
 
 export const CREDIT_CARD_FIELDS: FieldDef[] = [
@@ -46,9 +40,9 @@ export const CREDIT_CARD_FIELDS: FieldDef[] = [
     copyable: true,
     placeholder: '4111 1111 1111 1111',
   }),
-  field('expiryDate', 'Expiration Date', 'date', {
+  field('expiryDate', 'Expiration Date', 'cardExpiry', {
     expiry: true,
-    placeholder: 'YYYY-MM',
+    placeholder: 'MM/YY',
   }),
   field('cvv', 'Security Code', 'masked', { copyable: true }),
   field('pin', 'PIN', 'masked', { copyable: true }),

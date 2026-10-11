@@ -11,6 +11,7 @@ Vite · React 19 · TypeScript · Tailwind v4 · shadcn/ui · Zustand · Zod
 
 - [What "zero knowledge" means here](#what-zero-knowledge-means-here)
 - [Getting started](#getting-started)
+- [Deploying to Azure Static Web Apps](#deploying-to-azure-static-web-apps)
 - [Project structure](#project-structure)
 - [Business logic](#business-logic)
   - [Vault lifecycle](#vault-lifecycle)
@@ -56,6 +57,14 @@ npm run lint        # oxlint
 ```
 
 On Windows, use `npm.cmd` — PowerShell's execution policy blocks `npm.ps1`.
+
+## Deploying to Azure Static Web Apps
+
+Run `./scripts/deploy-swa.ps1` from PowerShell. The script builds the app,
+prompts for the Static Web Apps deployment token without echoing it, and deploys
+`dist` to the production environment using the SWA CLI. It uses an installed
+`swa` command when available, otherwise it runs the CLI through `npx`. The token
+is passed through a temporary process environment variable and is not saved.
 
 ## Project structure
 

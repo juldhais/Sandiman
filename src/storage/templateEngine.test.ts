@@ -82,6 +82,7 @@ describe('resolveFields', () => {
     expect(result.values).toEqual({ username: 'alice', url: 'https://example.test' })
     expect(result.customFields).toEqual([])
     expect(result.fieldOrder).toEqual(['username', 'url'])
+    expect(result.title).toBe('Example')
   })
 
   it('surfaces values whose field was removed from the template', () => {
@@ -146,6 +147,14 @@ describe('buildFieldSchema', () => {
     expect(schema.safeParse({ username: '   ' }).success).toBe(false)
   })
 
+  it('validates card expirations in MM/YY format', () => {
+    const schema = buildFieldSchema([field({ id: 'expiry', type: 'cardExpiry' })])
+    expect(schema.safeParse({ expiry: '04/28' }).success).toBe(true)
+    expect(schema.safeParse({ expiry: '' }).success).toBe(true)
+    expect(schema.safeParse({ expiry: '13/28' }).success).toBe(false)
+    expect(schema.safeParse({ expiry: '4/28' }).success).toBe(false)
+  })
+
   it('produces a zod object that can parse', () => {
     const schema: z.ZodObject<Record<string, z.ZodType<string>>> = buildFieldSchema([
       field({ id: 'a' }),
@@ -193,6 +202,14 @@ describe('suggestTitle', () => {
 })
 
 describe('built-in templates', () => {
+  it('keeps the Login template focused on website credentials', () => {
+    expect(loginTemplate.fields.map((field) => field.id)).toEqual([
+      'username',
+      'password',
+      'url',
+    ])
+  })
+
   it('seeds the four templates named in the spec', () => {
     const names = templates.map((t) => t.name)
     expect(names).toContain('Login')
@@ -217,7 +234,7 @@ describe('built-in templates', () => {
   it('exercises every field type across the seed set', () => {
     const used = new Set(templates.flatMap((t) => t.fields.map((f) => f.type)))
     expect([...used].sort()).toEqual(
-      ['boolean', 'date', 'masked', 'note', 'number', 'text', 'url'].sort(),
+      ['boolean', 'cardExpiry', 'date', 'masked', 'note', 'number', 'text', 'url'].sort(),
     )
   })
 

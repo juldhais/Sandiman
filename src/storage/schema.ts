@@ -57,7 +57,7 @@ export const templateSchema = z.object({
 export const itemSchema = z.object({
   id: z.string().min(1),
   templateId: z.string().nullable().catch(null),
-  title: z.string().catch(''),
+  title: z.string().trim().min(1).catch('Untitled'),
   values: z.record(z.string(), z.string()).catch({}),
   customFields: z.array(customFieldSchema).catch([]),
   fieldOrder: z.array(z.string()).catch([]).optional(),

@@ -17,11 +17,10 @@ import {
   buildFieldSchema,
   createItem,
   resolveFields,
-  suggestTitle,
   type ResolvedField,
 } from '@/storage/templateEngine'
 import { FIELD_TYPES } from '@/storage/types'
-import type { CustomField, FieldType, VaultItem, VaultTemplate } from '@/storage/types'
+import type { CustomField, FieldDef, FieldType, VaultItem, VaultTemplate } from '@/storage/types'
 import { useVaultStore } from '@/state/vaultStore'
 import { Button } from '@/components/ui/button'
 import {
@@ -44,15 +43,23 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { FieldControl } from '@/components/FieldControl'
-import { QuickGenerator } from '@/components/PasswordGenerator'
 
 const NO_TEMPLATE = '__none__'
+const TITLE_FIELD: FieldDef = {
+  id: '__title',
+  label: 'Title',
+  type: 'text',
+  required: true,
+  copyable: false,
+  expiry: false,
+}
 
 const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   text: 'Text',
   masked: 'Password (masked)',
   number: 'Number',
   date: 'Date',
+  cardExpiry: 'Card expiry (MM/YY)',
   boolean: 'Yes / No',
   url: 'URL',
   note: 'Multi-line note',
@@ -127,7 +134,11 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
   type FormValues = Record<string, string>
 
   const schema = useMemo(
-    () => buildFieldSchema(resolved.map((field) => field.def)) as unknown as z.ZodType<FormValues, FormValues>,
+    () =>
+      buildFieldSchema([
+        TITLE_FIELD,
+        ...resolved.map((field) => field.def),
+      ]) as unknown as z.ZodType<FormValues, FormValues>,
     [resolved],
   )
 
@@ -136,6 +147,7 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
     for (const field of allResolved) {
       initial[field.id] = field.value
     }
+    initial.__title = item?.title ?? ''
     if (item) initial.__notes = item.notes
     return initial
   }, [allResolved, item])
@@ -157,6 +169,7 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
     }
 
     const input = form.getValues()
+    const title = input.__title?.trim() ?? ''
     const tags = tagText
       .split(',')
       .map((tag) => tag.trim())
@@ -178,7 +191,7 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
           })),
         fieldOrder: resolved.map((field) => field.id),
         tags,
-        title: suggestTitle(resolved.map((f) => ({ ...f, value: input[f.id] ?? f.value }))),
+        title,
         notes: input.__notes ?? '',
       })
       toast.success('Item added')
@@ -187,7 +200,7 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
         itemForFields,
         activeTemplate,
         input,
-        item!.title,
+        title,
         tags,
         input.__notes ?? '',
         draftFields,
@@ -264,6 +277,25 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
           onSubmit={handleSubmit}
           className="scrollbar-slim min-h-0 flex-1 space-y-4 overflow-y-auto p-6"
         >
+          <div className="space-y-1.5">
+            <Label htmlFor="__title">
+              Title <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="__title"
+              value={values.__title ?? ''}
+              onChange={(event) => form.setValue('__title', event.target.value)}
+              aria-invalid={Boolean(form.formState.errors.__title)}
+              aria-describedby={form.formState.errors.__title ? '__title-error' : undefined}
+              autoFocus
+            />
+            {form.formState.errors.__title ? (
+              <p id="__title-error" className="text-destructive text-xs">
+                {form.formState.errors.__title.message}
+              </p>
+            ) : null}
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="item-template">Template</Label>
             <Select
@@ -333,11 +365,29 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
                       {editingFields ? (
                         <>
                           <Label htmlFor={`${field.id}-label`}>Field name</Label>
-                          <Input
-                            id={`${field.id}-label`}
-                            value={draftFields.find((custom) => custom.id === field.id)?.label ?? field.def.label}
-                            onChange={(event) => updateDraftField(field.id, { label: event.target.value })}
-                          />
+                          <div className="flex items-center gap-2">
+                            <Input
+                              id={`${field.id}-label`}
+                              className="min-w-0 flex-1"
+                              value={draftFields.find((custom) => custom.id === field.id)?.label ?? field.def.label}
+                              onChange={(event) => updateDraftField(field.id, { label: event.target.value })}
+                            />
+                            <Select
+                              value={field.def.type}
+                              onValueChange={(type: FieldType) => updateDraftField(field.id, { type })}
+                            >
+                              <SelectTrigger className="w-36 shrink-0" aria-label={`${field.def.label} type`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {FIELD_TYPES.map((type) => (
+                                  <SelectItem key={type} value={type}>
+                                    {FIELD_TYPE_LABELS[type]}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </>
                       ) : (
                         <Label htmlFor={field.id}>{field.def.label}</Label>
@@ -356,24 +406,6 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
                       ) : null}
                     </div>
                   )}
-
-                  {editingFields && field.custom ? (
-                    <Select
-                      value={field.def.type}
-                      onValueChange={(type: FieldType) => updateDraftField(field.id, { type })}
-                    >
-                      <SelectTrigger className="w-36" aria-label={`${field.def.label} type`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {FIELD_TYPES.map((type) => (
-                          <SelectItem key={type} value={type}>
-                            {FIELD_TYPE_LABELS[type]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : null}
 
                   {editingFields ? (
                     <Button
@@ -394,7 +426,12 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
                   value={values[field.id] ?? ''}
                   onChange={(value) => form.setValue(field.id as keyof FormValues, value)}
                   onBlur={() => form.trigger(field.id as keyof FormValues)}
-                  onGenerate={undefined}
+                  onGenerate={
+                    field.def.type === 'masked'
+                      ? (password) => form.setValue(field.id as keyof FormValues, password)
+                      : undefined
+                  }
+                  clearAfterSeconds={settings.clipboardClearSeconds}
                   aria-invalid={Boolean(error)}
                   aria-describedby={error ? `${field.id}-error` : undefined}
                 />
@@ -405,12 +442,6 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
                   </p>
                 ) : null}
 
-                {field.def.type === 'masked' ? (
-                  <QuickGenerator
-                    clearAfterSeconds={settings.clipboardClearSeconds}
-                    onUse={(password) => form.setValue(field.id as keyof FormValues, password)}
-                  />
-                ) : null}
               </div>
             )
           })}

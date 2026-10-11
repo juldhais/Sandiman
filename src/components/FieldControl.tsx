@@ -9,8 +9,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/PasswordInput'
-import { Button } from '@/components/ui/button'
-import { Sparkles } from 'lucide-react'
+import { QuickGenerator } from '@/components/PasswordGenerator'
+import { formatCardExpiryInput } from '@/storage/cardExpiry'
 import type { FieldDef } from '@/storage/types'
 
 export interface FieldControlProps {
@@ -18,8 +18,9 @@ export interface FieldControlProps {
   value: string
   onChange: (value: string) => void
   onBlur?: () => void
-  /** Hook for the generator's "use this" button. */
-  onGenerate?: () => void
+  /** Called when the user applies a generated password. */
+  onGenerate?: (password: string) => void
+  clearAfterSeconds?: number
   id?: string
   'aria-invalid'?: boolean
   'aria-describedby'?: string
@@ -31,36 +32,28 @@ export function FieldControl({
   onChange,
   onBlur,
   onGenerate,
+  clearAfterSeconds,
   id,
   ...aria
 }: FieldControlProps) {
   switch (def.type) {
     case 'masked':
       return (
-        <div className="flex w-full items-center gap-2">
-          <PasswordInput
-            id={id}
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            onBlur={onBlur}
-            placeholder={def.placeholder}
-            autoComplete="off"
-            spellCheck={false}
-            {...aria}
-          />
-          {onGenerate ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={onGenerate}
-              aria-label="Generate a password"
-              title="Generate a password"
-            >
-              <Sparkles />
-            </Button>
-          ) : null}
-        </div>
+        <PasswordInput
+          id={id}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
+          placeholder={def.placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          endAdornment={
+            onGenerate ? (
+              <QuickGenerator onUse={onGenerate} clearAfterSeconds={clearAfterSeconds} />
+            ) : undefined
+          }
+          {...aria}
+        />
       )
 
     case 'note':
@@ -104,6 +97,22 @@ export function FieldControl({
           onChange={(event) => onChange(event.target.value)}
           onBlur={onBlur}
           placeholder={def.placeholder ?? 'YYYY-MM-DD'}
+          className="font-mono-numbers"
+          {...aria}
+        />
+      )
+
+    case 'cardExpiry':
+      return (
+        <Input
+          id={id}
+          type="text"
+          inputMode="numeric"
+          maxLength={5}
+          value={value}
+          onChange={(event) => onChange(formatCardExpiryInput(event.target.value))}
+          onBlur={onBlur}
+          placeholder={def.placeholder ?? 'MM/YY'}
           className="font-mono-numbers"
           {...aria}
         />
@@ -181,7 +190,13 @@ export function FieldDisplay({ value, type }: { value: string; type: FieldDef['t
   }
 
   return (
-    <span className={type === 'number' || type === 'date' ? 'font-mono-numbers' : undefined}>
+    <span
+      className={
+        type === 'number' || type === 'date' || type === 'cardExpiry'
+          ? 'font-mono-numbers'
+          : undefined
+      }
+    >
       {value}
     </span>
   )

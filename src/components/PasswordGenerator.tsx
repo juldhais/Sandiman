@@ -5,29 +5,38 @@
  * forms, and a full panel for the sidebar. Both draw from the CSPRNG via
  * `generatePassword`.
  */
-import { useMemo, useState } from 'react'
-import { Check, RefreshCw } from 'lucide-react'
+import { useId, useMemo, useState } from 'react'
+import { Check, RefreshCw, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/cn'
 import { copyWithAutoClear } from '@/lib/clipboard'
 import {
   DEFAULT_GENERATOR_OPTIONS,
-  MAX_LENGTH,
+  MAX_SLIDER_LENGTH,
   MIN_LENGTH,
   checkOptions,
   estimateStrength,
   generatePassword,
+  optionsForPasswordType,
   type GeneratorOptions,
+  type PasswordType,
 } from '@/generator/password'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { CopyButton } from '@/components/CopyButton'
 import { PasswordInput } from '@/components/PasswordInput'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 const STRENGTH_COLORS = [
   'bg-destructive',
@@ -49,7 +58,10 @@ export function PasswordGenerator({
   className,
   clearAfterSeconds = 30,
 }: PasswordGeneratorProps) {
+  const generatorId = useId().replace(/:/g, '')
+  const [passwordType, setPasswordType] = useState<PasswordType>('random')
   const [options, setOptions] = useState<GeneratorOptions>(DEFAULT_GENERATOR_OPTIONS)
+  const [lengthText, setLengthText] = useState(String(DEFAULT_GENERATOR_OPTIONS.length))
 
   // The password is stored in state rather than derived, so regenerating
   // requires an explicit action and does not reroll under the user's cursor.
@@ -86,7 +98,7 @@ export function PasswordGenerator({
           <PasswordInput
             value={password}
             readOnly
-            forceMasked={false}
+            defaultRevealed
             className="font-mono"
             spellCheck={false}
             aria-label="Generated password"
@@ -112,83 +124,93 @@ export function PasswordGenerator({
         </div>
 
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground">{strength.label}</span>
-            <span className="text-muted-foreground font-mono-numbers">
-              {password.length} chars
-            </span>
-          </div>
           <Progress
             value={(strength.score + 1) * 20}
+            className="h-1.5"
             indicatorClassName={STRENGTH_COLORS[strength.score]}
             aria-label={`Password strength: ${strength.label}`}
           />
-          {strength.warnings.length > 0 ? (
-            <p className="text-muted-foreground text-xs">{strength.warnings[0]}</p>
-          ) : null}
+          <p className="text-muted-foreground text-xs">
+            {strength.label} · {password.length} characters
+          </p>
         </div>
       </div>
 
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <Label htmlFor="generator-length">Length</Label>
-          <Badge variant="secondary" className="font-mono-numbers">
-            {options.length}
-          </Badge>
-        </div>
-        <Slider
-          id="generator-length"
-          min={MIN_LENGTH}
-          max={MAX_LENGTH}
-          step={1}
-          value={[options.length]}
-          onValueChange={([value]) => update({ length: value ?? options.length })}
-          aria-label="Password length"
-        />
+        <Label htmlFor={`${generatorId}-type`}>Password type</Label>
+        <Select
+          value={passwordType}
+          onValueChange={(type: PasswordType) => {
+            setPasswordType(type)
+            update(optionsForPasswordType(options, type))
+          }}
+        >
+          <SelectTrigger id={`${generatorId}-type`} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="letters-and-numbers">Letters and numbers</SelectItem>
+            <SelectItem value="letters-only">Letters only</SelectItem>
+            <SelectItem value="numbers-only">Numbers only</SelectItem>
+            <SelectItem value="random">Random</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Toggle
-          label="Lowercase"
-          checked={options.lowercase}
-          onChange={(lowercase) => update({ lowercase })}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label htmlFor={`${generatorId}-length`}>Length</Label>
+          <Input
+            id={`${generatorId}-length`}
+            type="number"
+            inputMode="numeric"
+            min={MIN_LENGTH}
+            step={1}
+            value={lengthText}
+            onChange={(event) => {
+              const nextText = event.target.value
+              setLengthText(nextText)
+              update({ length: nextText === '' ? 0 : Number(nextText) })
+            }}
+            onBlur={() => {
+              const parsed = Number(lengthText)
+              const nextLength = Number.isFinite(parsed)
+                ? Math.max(MIN_LENGTH, Math.trunc(parsed))
+                : MIN_LENGTH
+              setLengthText(String(nextLength))
+              if (nextLength !== options.length) update({ length: nextLength })
+            }}
+            className="w-24 text-right font-mono-numbers"
+            aria-label="Password length"
+          />
+        </div>
+        <Slider
+          id={`${generatorId}-length-slider`}
+          min={MIN_LENGTH}
+          max={MAX_SLIDER_LENGTH}
+          step={1}
+          value={[Math.min(MAX_SLIDER_LENGTH, Math.max(MIN_LENGTH, options.length))]}
+          onValueChange={([value]) => {
+            const nextLength = value ?? options.length
+            setLengthText(String(nextLength))
+            update({ length: nextLength })
+          }}
+          aria-label="Password length slider"
         />
-        <Toggle
-          label="Uppercase"
-          checked={options.uppercase}
-          onChange={(uppercase) => update({ uppercase })}
-        />
-        <Toggle
-          label="Digits"
-          checked={options.digits}
-          onChange={(digits) => update({ digits })}
-        />
-        <Toggle
-          label="Symbols"
-          checked={options.symbols}
-          onChange={(symbols) => update({ symbols })}
-        />
+        <p className="text-muted-foreground text-xs">
+          Use the slider up to {MAX_SLIDER_LENGTH}, or type a longer length.
+        </p>
       </div>
 
       <div className="space-y-3 border-t pt-3">
         <div className="flex items-center justify-between gap-4">
-          <Label htmlFor="generator-ambiguous" className="font-normal">
+          <Label htmlFor={`${generatorId}-ambiguous`} className="font-normal">
             Exclude ambiguous characters
           </Label>
           <Switch
-            id="generator-ambiguous"
+            id={`${generatorId}-ambiguous`}
             checked={options.excludeAmbiguous}
             onCheckedChange={(excludeAmbiguous) => update({ excludeAmbiguous })}
-          />
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <Label htmlFor="generator-each-set" className="font-normal">
-            Include every character set
-          </Label>
-          <Switch
-            id="generator-each-set"
-            checked={options.requireEachSet}
-            onCheckedChange={(requireEachSet) => update({ requireEachSet })}
           />
         </div>
       </div>
@@ -197,7 +219,9 @@ export function PasswordGenerator({
         <p className="text-destructive text-xs">
           {check.error === 'no-character-sets'
             ? 'Enable at least one character set.'
-            : `Length must be at least ${check.minimumLength} to include every set.`}
+            : check.error === 'invalid-length'
+              ? 'Length must be a whole number.'
+              : `Length must be at least ${check.minimumLength} characters.`}
         </p>
       ) : null}
 
@@ -219,31 +243,8 @@ export function PasswordGenerator({
   )
 }
 
-function Toggle({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string
-  checked: boolean
-  onChange: (checked: boolean) => void
-}) {
-  const id = `generator-${label.toLowerCase().replace(/\s+/g, '-')}`
-  return (
-    <div className="flex items-center gap-2">
-      <Checkbox id={id} checked={checked} onCheckedChange={(value) => onChange(value === true)} />
-      <Label htmlFor={id} className="cursor-pointer font-normal">
-        {label}
-      </Label>
-    </div>
-  )
-}
-
 /**
- * Small inline generator for use inside an item form's password field.
- *
- * Kept separate from the full panel so the form does not have to render every
- * option when the user only wants a one-off password.
+ * Configurable password generator in a popover for an item's password field.
  */
 export function QuickGenerator({
   onUse,
@@ -252,39 +253,36 @@ export function QuickGenerator({
   onUse: (password: string) => void
   clearAfterSeconds?: number
 }) {
-  const [options] = useState<GeneratorOptions>({
-    ...DEFAULT_GENERATOR_OPTIONS,
-    length: 24,
-  })
-  const [password, setPassword] = useState(() => generatePassword(options))
-
-  function regenerate(): void {
-    if (checkOptions(options).error) return
-    setPassword(generatePassword(options))
-  }
-
-  async function copyAndUse(): Promise<void> {
-    await copyWithAutoClear(password, clearAfterSeconds)
-    onUse(password)
-    toast.success('Password copied and applied', {
-      description: `Clipboard clears in ${clearAfterSeconds}s`,
-    })
-  }
+  const [open, setOpen] = useState(false)
 
   return (
-    <div className="flex items-center gap-2">
-      <PasswordInput
-        value={password}
-        readOnly
-        className="h-8 font-mono text-xs"
-        aria-label="Generated password"
-      />
-      <Button type="button" variant="outline" size="icon-sm" onClick={regenerate} aria-label="Regenerate">
-        <RefreshCw />
-      </Button>
-      <Button type="button" size="sm" onClick={() => void copyAndUse()}>
-        Use
-      </Button>
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Open password generator"
+          title="Open password generator"
+        >
+          <Sparkles />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="end"
+        sideOffset={6}
+        className="max-h-[min(80dvh,42rem)] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto"
+      >
+        <PasswordGenerator
+          clearAfterSeconds={clearAfterSeconds}
+          onUse={(password) => {
+            onUse(password)
+            void copyWithAutoClear(password, clearAfterSeconds)
+            setOpen(false)
+          }}
+        />
+      </PopoverContent>
+    </Popover>
   )
 }

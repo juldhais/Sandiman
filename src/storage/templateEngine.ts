@@ -6,6 +6,7 @@
  * resolvers here, so they cannot drift apart.
  */
 import { z } from 'zod'
+import { isValidCardExpiry } from './cardExpiry'
 import {
   DEFAULT_SETTINGS,
   type FieldDef,
@@ -136,11 +137,9 @@ export function expiryFields(item: VaultItem, template: VaultTemplate | null): R
 /**
  * Builds a zod object schema from field definitions.
  *
- * `required` drives the only validation rule: a required field must have a
- * non-blank value. Type-level constraints are intentionally left to the input
- * controls rather than the schema, because a `date` field is stored as free
- * text and a stricter parse would reject values the user can legitimately
- * type (a partial year, for instance).
+ * `required` drives the basic non-blank rule. The card-expiry type also has a
+ * strict MM/YY check; ordinary date fields remain free text so partial dates
+ * and other user-entered formats can still be stored.
  */
 export function buildFieldSchema(
   fields: readonly FieldDef[],
@@ -148,9 +147,19 @@ export function buildFieldSchema(
   const shape: Record<string, z.ZodType<string>> = {}
 
   for (const def of fields) {
-    shape[def.id] = def.required
-      ? z.string().trim().min(1, `${def.label} is required`)
-      : z.string().catch('')
+    if (def.type === 'cardExpiry') {
+      shape[def.id] = z.string().trim().superRefine((value, context) => {
+        if (!value && def.required) {
+          context.addIssue({ code: 'custom', message: `${def.label} is required` })
+        } else if (value && !isValidCardExpiry(value)) {
+          context.addIssue({ code: 'custom', message: `${def.label} must use MM/YY` })
+        }
+      })
+    } else {
+      shape[def.id] = def.required
+        ? z.string().trim().min(1, `${def.label} is required`)
+        : z.string().catch('')
+    }
   }
 
   return z.object(shape)

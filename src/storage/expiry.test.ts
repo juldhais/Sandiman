@@ -102,11 +102,12 @@ describe('collectExpiries', () => {
   })
 
   it('finds a credit card expiry', () => {
-    const card: VaultItem = { ...login({}), templateId: 'builtin-credit-card', values: { expiryDate: '2026-02-01' } }
+    const card: VaultItem = { ...login({}), templateId: 'builtin-credit-card', values: { expiryDate: '01/26' } }
     const summary = collectExpiries([card], templates, 30, NOW)
 
     expect(summary.entries).toHaveLength(1)
     expect(summary.entries[0]!.fieldLabel).toBe('Expiration Date')
+    expect(summary.entries[0]!.expiresAt?.toISOString()).toBe('2026-01-31T23:59:59.999Z')
     expect(summary.warning + summary.critical).toBeGreaterThan(0)
   })
 
@@ -114,7 +115,7 @@ describe('collectExpiries', () => {
     const card: VaultItem = {
       ...login({}),
       templateId: 'builtin-credit-card',
-      values: { expiryDate: '2026-02-01' },
+      values: { expiryDate: '01/26' },
       deleted: true,
     }
 
@@ -139,13 +140,13 @@ describe('collectExpiries', () => {
       ...login({}),
       id: 'soon',
       templateId: 'builtin-credit-card',
-      values: { expiryDate: '2026-01-20' },
+      values: { expiryDate: '01/26' },
     }
     const later: VaultItem = {
       ...login({}),
       id: 'later',
       templateId: 'builtin-credit-card',
-      values: { expiryDate: '2027-01-20' },
+      values: { expiryDate: '01/27' },
     }
 
     const summary = collectExpiries([later, soon], templates, 30, NOW)

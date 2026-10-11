@@ -38,8 +38,50 @@ export interface GeneratorOptions {
   requireEachSet: boolean
 }
 
+export type PasswordType = 'letters-and-numbers' | 'letters-only' | 'numbers-only' | 'random'
+
+type CharacterSelection = Pick<
+  GeneratorOptions,
+  'lowercase' | 'uppercase' | 'digits' | 'symbols'
+>
+
+const PASSWORD_TYPE_SETS: Record<PasswordType, CharacterSelection> = {
+  'letters-and-numbers': {
+    lowercase: true,
+    uppercase: true,
+    digits: true,
+    symbols: false,
+  },
+  'letters-only': {
+    lowercase: true,
+    uppercase: true,
+    digits: false,
+    symbols: false,
+  },
+  'numbers-only': {
+    lowercase: false,
+    uppercase: false,
+    digits: true,
+    symbols: false,
+  },
+  random: {
+    lowercase: true,
+    uppercase: true,
+    digits: true,
+    symbols: true,
+  },
+}
+
+/** Applies one of the generator's common character-set presets. */
+export function optionsForPasswordType(
+  options: GeneratorOptions,
+  type: PasswordType,
+): GeneratorOptions {
+  return { ...options, ...PASSWORD_TYPE_SETS[type] }
+}
+
 export const DEFAULT_GENERATOR_OPTIONS: GeneratorOptions = {
-  length: 20,
+  length: 16,
   lowercase: true,
   uppercase: true,
   digits: true,
@@ -48,11 +90,12 @@ export const DEFAULT_GENERATOR_OPTIONS: GeneratorOptions = {
   requireEachSet: true,
 }
 
-export const MIN_LENGTH = 8
-export const MAX_LENGTH = 128
+export const MIN_LENGTH = 4
+/** The slider stops at 64; longer lengths can be typed in the generator. */
+export const MAX_SLIDER_LENGTH = 64
 
 /** Why a configuration cannot produce a password. */
-export type GeneratorError = 'no-character-sets' | 'length-too-short' | null
+export type GeneratorError = 'no-character-sets' | 'length-too-short' | 'invalid-length' | null
 
 export interface GeneratorCheck {
   error: GeneratorError
@@ -66,7 +109,10 @@ export function checkOptions(options: GeneratorOptions): GeneratorCheck {
     return { error: 'no-character-sets', minimumLength: 0 }
   }
   const enabledSets = enabledSetCount(options)
-  const minimumLength = options.requireEachSet ? enabledSets : 1
+  const minimumLength = Math.max(MIN_LENGTH, options.requireEachSet ? enabledSets : 1)
+  if (!Number.isInteger(options.length)) {
+    return { error: 'invalid-length', minimumLength }
+  }
   if (options.length < minimumLength) {
     return { error: 'length-too-short', minimumLength }
   }
@@ -122,6 +168,9 @@ export function generatePassword(options: GeneratorOptions): string {
   }
   if (error === 'length-too-short') {
     throw new Error(`Length must be at least ${minimumLength} to include every character set`)
+  }
+  if (error === 'invalid-length') {
+    throw new Error('Length must be a whole number')
   }
 
   const activeSpecs = specs(options)

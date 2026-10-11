@@ -7,7 +7,7 @@
  * three at once.
  */
 import { useMemo, useState } from 'react'
-import { ExternalLink, Pencil, Trash2 } from 'lucide-react'
+import { Eye, EyeOff, ExternalLink, Pencil, Trash2 } from 'lucide-react'
 import { populatedFields, resolveFields } from '@/storage/templateEngine'
 import type { ExpiryEntry } from '@/storage/expiry'
 import type { VaultItem, VaultTemplate } from '@/storage/types'
@@ -139,7 +139,7 @@ export function ItemDetail({ item, template, expiries, onEdit, onDelete }: ItemD
                             // switching items clears it; the field's own
                             // toggle is disabled to avoid two sources of truth.
                             revealable={false}
-                            forceMasked={!isRevealed}
+                            revealed={isRevealed}
                             className="border-transparent bg-muted/50 shadow-none"
                           />
                         </div>
@@ -156,12 +156,14 @@ export function ItemDetail({ item, template, expiries, onEdit, onDelete }: ItemD
 
                     {isSecret ? (
                       <Button
+                        type="button"
                         variant="ghost"
                         size="icon-sm"
                         onClick={() => toggleReveal(field.id)}
                         aria-label={isRevealed ? `Hide ${field.def.label}` : `Reveal ${field.def.label}`}
+                        aria-pressed={isRevealed}
                       >
-                        {isRevealed ? 'Hide' : 'Reveal'}
+                        {isRevealed ? <EyeOff /> : <Eye />}
                       </Button>
                     ) : null}
 
@@ -210,4 +212,3 @@ export function ItemDetail({ item, template, expiries, onEdit, onDelete }: ItemD
     </div>
   )
 }
-

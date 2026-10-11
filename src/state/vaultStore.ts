@@ -21,7 +21,6 @@ import { clearSyncSessionKey } from '@/sync/syncEngine'
 import {
   removeItemFields,
   resolveFields,
-  suggestTitle,
   touchItem,
   touchTemplate,
 } from '@/storage/templateEngine'
@@ -324,7 +323,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
           return touchItem({
             ...existing,
             templateId: template?.id ?? null,
-            title: title.trim() || suggestTitle(resolved),
+            title: title.trim(),
             values,
             customFields: customFields
               .filter((custom) => !removedIds.has(custom.id))

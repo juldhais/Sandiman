@@ -15,6 +15,7 @@ export const FIELD_TYPES = [
   'masked',
   'number',
   'date',
+  'cardExpiry',
   'boolean',
   'url',
   'note',
@@ -35,7 +36,7 @@ export interface FieldDef {
   required: boolean
   /** Renders a click-to-copy button next to the value. */
   copyable: boolean
-  /** Marks a `date` field as an expiry, which drives dashboard warnings. */
+  /** Marks a date-like field as an expiry, which drives dashboard warnings. */
   expiry: boolean
   placeholder?: string
   defaultValue?: string
@@ -86,7 +87,7 @@ export interface Syncable {
 export interface VaultItem extends Syncable {
   /** Null once the backing template has been removed. */
   templateId: string | null
-  /** The item's own display name; not derived from any particular field. */
+  /** Static display title; separate from template fields and never reordered or deleted. */
   title: string
   /** Field id to value, covering both template fields and template-less items. */
   values: Record<string, string>

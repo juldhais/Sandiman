@@ -250,6 +250,7 @@ export function Vault() {
               <ExpiryDashboard summary={expiry} onSelectItem={setSelectedId} />
             ) : selected ? (
               <ItemDetail
+                key={`${selected.id}:${selected.updatedAt}`}
                 item={selected}
                 template={selected.templateId ? (templateById.get(selected.templateId) ?? null) : null}
                 expiries={expiriesByItem.get(selected.id) ?? []}

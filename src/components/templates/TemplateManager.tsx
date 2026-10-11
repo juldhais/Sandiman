@@ -52,6 +52,7 @@ const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   masked: 'Password (masked)',
   number: 'Number',
   date: 'Date',
+  cardExpiry: 'Card expiry (MM/YY)',
   boolean: 'Yes / No',
   url: 'URL',
   note: 'Multi-line note',
@@ -93,7 +94,7 @@ export function TemplateManager({
             onSave={async (changes) => {
               await updateTemplate(editing.id, changes)
               toast.success('Template saved')
-              onOpenChange(false)
+              setSelectedId(null)
             }}
           />
         ) : (
@@ -578,14 +579,14 @@ function TemplateEditor({
                 <label className="flex items-center gap-1.5 text-xs">
                   <Switch
                     checked={field.expiry}
-                    disabled={field.type !== 'date'}
+                    disabled={field.type !== 'date' && field.type !== 'cardExpiry'}
                     onCheckedChange={(expiry) => updateField(field.id, { expiry })}
                   />
                   Expiry
                 </label>
               </div>
 
-              {field.type === 'date' && field.expiry ? (
+              {(field.type === 'date' || field.type === 'cardExpiry') && field.expiry ? (
                 <Alert className="py-2">
                   <Info className="size-3.5" />
                   <AlertDescription className="text-xs">

@@ -15,6 +15,11 @@ const baseItem = {
 }
 
 describe('item schema field preferences', () => {
+  it('requires every item to have a static title', () => {
+    expect(itemSchema.parse({ ...baseItem, title: '' }).title).toBe('Untitled')
+    expect(itemSchema.parse(baseItem).title).toBe('Example')
+  })
+
   it('keeps per-item ordering when parsing', () => {
     const item = itemSchema.parse({
       ...baseItem,
