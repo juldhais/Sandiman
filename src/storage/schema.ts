@@ -9,7 +9,7 @@
  */
 import { z } from 'zod'
 import { FIELD_TYPES, DEFAULT_SETTINGS, VAULT_PAYLOAD_VERSION } from './types'
-import { DEFAULT_AZURE_SYNC_CONFIG } from '@/sync/types'
+import { DEFAULT_GITHUB_SYNC_CONFIG } from '@/sync/types'
 
 /** Coerces anything timestamp-ish into epoch millis, defaulting to `fallback`. */
 function epochMs(fallback: number) {
@@ -78,18 +78,20 @@ export const settingsSchema = z
   })
   .catch(DEFAULT_SETTINGS)
 
-export const azureSyncConfigSchema = z
+export const githubSyncConfigSchema = z
   .object({
-    containerName: z.string().min(1).catch(DEFAULT_AZURE_SYNC_CONFIG.containerName),
-    blobName: z.string().min(1).catch(DEFAULT_AZURE_SYNC_CONFIG.blobName),
-    sasUrl: z.string().catch(''),
+    owner: z.string().catch(''),
+    repo: z.string().catch(''),
+    branch: z.string().catch(''),
+    path: z.string().catch(DEFAULT_GITHUB_SYNC_CONFIG.path),
+    token: z.string().catch(''),
     autoSync: z.boolean().catch(false),
-    autoSyncMinutes: z.number().int().min(1).max(1440).catch(DEFAULT_AZURE_SYNC_CONFIG.autoSyncMinutes),
+    autoSyncMinutes: z.number().int().min(1).max(1440).catch(DEFAULT_GITHUB_SYNC_CONFIG.autoSyncMinutes),
   })
-  .catch(DEFAULT_AZURE_SYNC_CONFIG)
+  .catch(DEFAULT_GITHUB_SYNC_CONFIG)
 
 export const storedSyncSettingsSchema = z.object({
-  config: azureSyncConfigSchema,
+  config: githubSyncConfigSchema,
 })
 
 export const vaultPayloadSchema = z.object({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { azureSyncConfigSchema, itemSchema, storedSyncSettingsSchema } from '@/storage/schema'
+import { githubSyncConfigSchema, itemSchema, storedSyncSettingsSchema } from '@/storage/schema'
 
 const baseItem = {
   id: 'item-1',
@@ -37,20 +37,23 @@ describe('item schema field preferences', () => {
   })
 })
 
-describe('Azure sync configuration', () => {
-  it('keeps the SAS URL and storage location while dropping unknown credentials', () => {
-    const config = azureSyncConfigSchema.parse({
-      sasUrl: 'https://account.blob.core.windows.net/?sv=2021-12-02&sig=secret',
-      containerName: 'custom-container',
-      blobName: 'custom-vault.json',
+describe('GitHub sync configuration', () => {
+  it('keeps repository and PAT settings while dropping unknown fields', () => {
+    const config = githubSyncConfigSchema.parse({
+      owner: 'example-owner',
+      repo: 'vault',
+      branch: 'main',
+      path: 'private/vault.json',
+      token: 'github_pat_test-secret',
       email: 'user@example.com',
       autoSync: true,
       autoSyncMinutes: 10,
     })
 
-    expect(config.sasUrl).toContain('sig=secret')
-    expect(config.containerName).toBe('custom-container')
-    expect(config.blobName).toBe('custom-vault.json')
+    expect(config.owner).toBe('example-owner')
+    expect(config.repo).toBe('vault')
+    expect(config.path).toBe('private/vault.json')
+    expect(config.token).toBe('github_pat_test-secret')
     expect('email' in config).toBe(false)
     expect(config.autoSync).toBe(true)
 

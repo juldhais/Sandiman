@@ -209,13 +209,14 @@ describe('payload versioning', () => {
     const { toSyncPayload } = await import('@/storage/types')
     const payload: VaultPayload = {
       ...emptyPayload(0),
-      sync: { config: { sasUrl: 'https://account.blob.core.windows.net/?sig=sync-secret' } as never },
+      sync: { config: { token: 'github_pat_sync-secret' } as never },
     }
 
     const shared = toSyncPayload(payload)
 
     expect(shared).not.toHaveProperty('sync')
-    expect(JSON.stringify(shared)).not.toContain('sync-secret')
+    expect(JSON.stringify(shared)).not.toContain('github_pat_sync-secret')
+    expect(shared.settings.lastSyncAt).toBeNull()
   })
 })
 

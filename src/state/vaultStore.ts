@@ -40,7 +40,7 @@ import {
   savePayloadChanges,
   unlock,
 } from '@/storage/vaultService'
-import { DEFAULT_AZURE_SYNC_CONFIG, type AzureSyncConfig } from '@/sync/types'
+import { DEFAULT_GITHUB_SYNC_CONFIG, type GitHubSyncConfig } from '@/sync/types'
 
 /** Which screen the app is showing. */
 export type Screen = 'loading' | 'onboarding' | 'unlock' | 'vault'
@@ -62,7 +62,7 @@ export interface VaultStore {
   deletedItems: VaultItem[]
   templates: VaultTemplate[]
   settings: VaultSettings
-  sync: { config: AzureSyncConfig }
+  sync: { config: GitHubSyncConfig }
 
   /** True while a write is in flight; the shell uses this for the save indicator. */
   saving: boolean
@@ -81,6 +81,7 @@ export interface VaultStore {
   unlockVault: (password: string) => Promise<boolean>
   lock: () => void
   addItem: (item: VaultItem) => Promise<void>
+  addItems: (items: VaultItem[]) => Promise<void>
   updateItem: (id: string, changes: Partial<VaultItem>) => Promise<void>
   saveItemFromForm: (
     item: VaultItem,
@@ -104,7 +105,7 @@ export interface VaultStore {
   duplicateTemplate: (id: string) => Promise<VaultTemplate | null>
 
   updateSettings: (changes: Partial<VaultSettings>) => Promise<void>
-  updateSyncConfig: (changes: Partial<AzureSyncConfig>) => Promise<void>
+  updateSyncConfig: (changes: Partial<GitHubSyncConfig>) => Promise<void>
 
   /** Replaces the whole payload, used by the sync merge. */
   applyMergedPayload: (payload: VaultPayload) => Promise<void>
@@ -205,7 +206,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
       templates: payload.templates.length > 0 ? payload.templates : createBuiltinTemplates(),
       settings: { ...DEFAULT_SETTINGS, ...payload.settings },
       sync: {
-        config: { ...DEFAULT_AZURE_SYNC_CONFIG, ...(payload.sync?.config ?? {}) },
+        config: { ...DEFAULT_GITHUB_SYNC_CONFIG, ...(payload.sync?.config ?? {}) },
       },
       screen: 'vault',
     })
@@ -229,7 +230,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
     deletedItems: [],
     templates: [],
     settings: { ...DEFAULT_SETTINGS },
-    sync: { config: { ...DEFAULT_AZURE_SYNC_CONFIG } },
+    sync: { config: { ...DEFAULT_GITHUB_SYNC_CONFIG } },
     saving: false,
     busy: false,
     error: null,
@@ -302,7 +303,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
         screen: 'unlock',
         items: [],
         deletedItems: [],
-        sync: { config: { ...DEFAULT_AZURE_SYNC_CONFIG } },
+        sync: { config: { ...DEFAULT_GITHUB_SYNC_CONFIG } },
         error: null,
         saving: false,
       })
@@ -310,6 +311,12 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
 
     async addItem(item) {
       set((state) => ({ items: [...state.items, item] }))
+      await persist()
+    },
+
+    async addItems(items) {
+      if (items.length === 0) return
+      set((state) => ({ items: [...state.items, ...items] }))
       await persist()
     },
 

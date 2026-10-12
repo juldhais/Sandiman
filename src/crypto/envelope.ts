@@ -3,7 +3,7 @@
  *
  * The envelope is the only thing that ever leaves this module in plaintext:
  * a KDF descriptor, an IV, and ciphertext. Everything else in the vault is
- * opaque to storage and to Azure. Fields are additive-only within a version
+ * opaque to storage and to GitHub. Fields are additive-only within a version
  * so an older build can still read a newer payload.
  */
 export const ENVELOPE_VERSION = 1
@@ -47,7 +47,7 @@ export interface KdfParams {
  * Serialisable, versioned crypto envelope.
  *
  * This is the on-disk / on-blob shape. Note what is absent: no host, no
- * account, no item metadata. Azure sees only these bytes.
+ * account, no item metadata. GitHub sees only these bytes.
  */
 export interface Envelope {
   v: number

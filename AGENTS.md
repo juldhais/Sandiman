@@ -7,8 +7,8 @@ Guidance for agents working in this repository.
 A zero-knowledge password manager that runs entirely in the browser. No backend,
 no account. The vault is encrypted on-device with AES-GCM-256 under a key
 derived from the user's master password via PBKDF2-HMAC-SHA256, stored in
-IndexedDB, and optionally synced as ciphertext to an Azure Blob Storage
-container the user controls.
+IndexedDB, and optionally synced as ciphertext to a GitHub repository the user
+controls.
 
 The zero-knowledge property is the product. Changes that weaken it are not
 acceptable regardless of what they make easier.
@@ -35,13 +35,13 @@ src/
   crypto/                 PBKDF2 Web Worker, AES-GCM, envelope, secure randomness
   storage/                Vault/domain types, templates, expiry, schemas, IndexedDB
   generator/              Password generation and strength estimation
-  sync/                   SAS URL parsing, Azure Blob SDK transport, merge, sync
+  sync/                   GitHub Octokit transport, config validation, merge, sync
   state/                  Zustand vault state, auto-lock, auto-sync, theme
   components/
     ui/                   Shared Radix/shadcn-style primitives
     vault/                Item list/detail/form, sidebar, expiry dashboard
     templates/            Template management and field builder
-    sync/                 Azure sync settings and controls
+    sync/                 GitHub sync settings and controls
     settings/             Vault and application preferences
   screens/                Onboarding, Unlock, Vault
   lib/                    Class names, clipboard, ids
@@ -56,7 +56,7 @@ lower layer should not import from a higher one.
 
 Two deliberate exceptions, both type-only so they cost nothing at runtime:
 `crypto/aes.ts` imports the `VaultPayload` type from `storage/types`, and
-`storage/types.ts` + `storage/schema.ts` import `AzureSyncConfig` from
+`storage/types.ts` + `storage/schema.ts` import `GitHubSyncConfig` from
 `sync/types` (a leaf module with no imports of its own). Runtime imports are
 acyclic — `storage` uses `crypto`, `sync` uses `storage`, and nothing in
 `crypto/` imports from `storage/` at runtime. Do not deepen these edges; if a
@@ -104,7 +104,7 @@ version requires a fresh database or a deliberate upgrade path.
 - **`vault`** uses `key` as its key path and contains one record:
   `{ key: 'primary', envelope: { v, kdf, iv, data }, updatedAt }`. The envelope
   encrypts the local header with AES-GCM under the master key. The header holds
-  templates, settings (including the local Azure SAS configuration), payload
+  templates, settings (including the local GitHub PAT configuration), payload
   version/timestamp, and `localItemCount`; its `items` array is empty. The count
   is encrypted so unlock can detect missing item rows. Envelope version, KDF
   descriptor, and IV are visible metadata, not secrets.
@@ -119,15 +119,17 @@ version requires a fresh database or a deliberate upgrade path.
   a soft-delete tombstone, so it remains stored until sync merge removes it.
 - **`meta`** is a key/value store for bookkeeping only: `initialized`,
   `master-kdf` (non-secret KDF descriptor), `created-at`, and
-  `last-local-write`. Never put passwords, keys, SAS secrets, or item data here.
+  `last-local-write`. Never put passwords, keys, PATs, or item data here.
 
 Prepare ciphertext before opening a transaction, then atomically commit related
 header/item/meta writes. Unlock decrypts and validates the header and every item
 before exposing them to the UI. Changing the master password re-encrypts the
-header and all items. This local layout is distinct from Azure sync, which still
-uses one encrypted shareable payload and excludes the local SAS configuration.
-The IndexedDB version number, AES envelope version, and payload version are
-separate concepts; keep the initial IndexedDB version at 1 for this schema.
+header and all items. This local layout is distinct from GitHub sync, which still
+uses one encrypted shareable payload and excludes the local PAT configuration.
+The local last-sync timestamp is not part of that payload, so periodic sync does
+not create commits solely for bookkeeping. The IndexedDB version number, AES
+envelope version, and payload version are separate concepts; keep the initial
+IndexedDB version at 1 for this schema.
 
 ## Features
 
@@ -147,18 +149,18 @@ separate concepts; keep the initial IndexedDB version at 1 for this schema.
   filters.
 - **Locking and preferences:** Configure idle auto-lock, lock-on-blur, theme,
   clipboard clearing, and expiry warnings.
-- **Azure Blob sync:** Optional manual or interval sync stores only encrypted
-  vault data remotely. The browser authenticates with a Blob SAS URL; sync uses
-  a master-password-derived key, a blob lease for concurrency, and per-record
-  merge semantics. The SAS URL is stored inside the encrypted local vault and
-  excluded from the uploaded payload. Users should scope SAS permissions and
-  expiry as narrowly as practical.
+- **GitHub sync:** Optional manual or interval sync stores one encrypted vault
+  payload in a user-controlled repository. Octokit authenticates with a
+  fine-grained PAT, stored only inside the locally encrypted vault and excluded
+  from uploads. Updates use the remote file SHA for optimistic concurrency and
+  per-record merge semantics. Recommend private repositories; commit history
+  retains older encrypted copies.
 
 ## Testing
 
 Vitest, tests colocated as `*.test.ts` next to the module. The suite covers
-crypto round-trips, merge semantics, expiry parsing, credential parsing and
-signing, generation, schema validation, and storage lifecycle.
+crypto round-trips, merge semantics, expiry parsing, GitHub config and transport,
+generation, schema validation, and storage lifecycle.
 
 Two constraints when writing tests:
 
@@ -167,8 +169,3 @@ Two constraints when writing tests:
   the test does not exercise the real derivation. `aes.test.ts` shows the
   pattern.
 - `fake-indexeddb/auto` must be imported to test anything touching `storage/db`.
-
-When changing security-relevant logic, write the test first and confirm it fails
-before the fix. Three real bugs were caught this way: identical vaults reporting
-as "diverged" on every sync, `MM/YYYY` (the most common card-expiry format)
-failing to parse, and tombstoned items being dropped from the payload.

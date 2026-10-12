@@ -10,7 +10,7 @@
  *    timestamps. The salt and iteration count are not secret; the ciphertext
  *    is. Nothing here reveals vault contents.
  *
- * Azure sync configuration is stored inside the master-key-encrypted payload.
+ * GitHub sync configuration is stored inside the master-key-encrypted payload.
  */
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { Envelope, KdfParams, RecordCiphertext } from '@/crypto/envelope'

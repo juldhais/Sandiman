@@ -2,8 +2,8 @@
 
 A zero-knowledge password manager that runs entirely in the browser. There is no
 backend and no account: your vault is encrypted on your device, stored in
-IndexedDB, and optionally synced as ciphertext to an Azure Blob Storage
-container you control.
+IndexedDB, and optionally synced as ciphertext to a GitHub repository you
+control.
 
 Vite · React 19 · TypeScript · Tailwind v4 · shadcn/ui · Zustand · Zod
 
@@ -23,7 +23,7 @@ Vite · React 19 · TypeScript · Tailwind v4 · shadcn/ui · Zustand · Zod
   - [Password generation](#password-generation)
   - [Locking](#locking)
   - [Sync](#sync)
-  - [Credentials](#credentials)
+- [GitHub credentials](#github-credentials)
 - [Design decisions](#design-decisions)
 - [Threat model](#threat-model)
 
@@ -33,7 +33,7 @@ The master password never leaves the browser. It is stretched with
 PBKDF2-HMAC-SHA256 (600,000 iterations) into a non-extractable AES-GCM-256 key,
 and vault data is encrypted under that key before anything touches disk. Local
 IndexedDB stores an encrypted header and one authenticated ciphertext per item;
-Azure sync still uses a single encrypted payload envelope. The local header and
+GitHub sync still uses a single encrypted payload envelope. The local header and
 sync envelope contain only:
 
 - the KDF descriptor (algorithm, iteration count, salt) — not secret
@@ -63,7 +63,7 @@ One record, keyed by `key: "primary"`:
 ```
 
 `envelope.data` is AES-GCM ciphertext for the small local header JSON. That
-header contains the payload version, templates, settings (including local Azure
+header contains the payload version, templates, settings (including local GitHub
 sync configuration), the timestamp, and `localItemCount`. Its `items` array is
 empty: item contents live in the `items` store below. `localItemCount` is
 encrypted and lets unlock detect missing item records. The envelope's KDF
@@ -110,9 +110,9 @@ Unlock decrypts the header and all item records into memory. Changing the master
 password re-encrypts all of them under the new key. This is the initial storage
 layout; no migration from an earlier single-envelope layout is provided.
 
-This local layout is separate from Azure sync: sync still uploads one
+This local layout is separate from GitHub sync: sync still uploads one
 master-key-encrypted payload containing the shareable items, templates, and
-settings, without the local header markers or Azure credentials.
+settings, without the local header markers or GitHub credentials.
 
 ## Getting started
 
@@ -174,12 +174,11 @@ src/
 ├── generator/       Password generation and strength estimation
 │   └── password.ts
 │
-├── sync/            Azure transport and merge semantics
-│   ├── credentialParsing.ts   Parse + validate, no SDK import
-│   ├── azure.ts               SDK clients for SAS (lazy-loaded)
-│   ├── sharedKeyTransport.ts  Hand-rolled REST + WebCrypto signing
+├── sync/            GitHub API transport and merge semantics
+│   ├── githubConfig.ts        Validate repository/token settings
+│   ├── github.ts              Octokit transport for encrypted file
 │   ├── merge.ts               Per-record conflict resolution
-│   ├── syncEngine.ts          acquire lease → merge → upload
+│   ├── syncEngine.ts          read/SHA-check → merge → conditional commit
 │   └── types.ts               Sync config and outcome types
 │
 ├── state/           Runtime session state
@@ -204,7 +203,7 @@ src/
 **Layering.** Dependencies flow roughly `crypto` ← `storage` ← `sync`/`state` →
 `components` → `screens`. Two exceptions are type-only and cost nothing at
 runtime: `crypto/aes.ts` borrows the `VaultPayload` type from `storage/types`,
-and `storage/types.ts` borrows `AzureSyncConfig` from `sync/types`. Runtime
+and `storage/types.ts` borrows `GitHubSyncConfig` from `sync/types`. Runtime
 imports are acyclic.
 
 **Why it is split this way.** `storage/` is where the rules are, and it is the
@@ -273,18 +272,9 @@ one-off case a template does not cover.
 An item's values live in a flat `values` map keyed by field id, alongside its
 custom fields, tags, and free-text notes.
 
-**Titles are suggested, not typed.** When saving, `suggestTitle()` picks a
-recognisable field — username, card number, document number, host — falling back
-to the first non-blank value.
-
 **Blank is not the same as absent.** Empty strings are removed from the value
 map rather than stored, so "the user cleared this field" stays distinguishable
 from "this field was never set".
-
-**Deletes are soft.** A deleted item is moved to `deletedItems` on the store
-rather than removed, and `restoreItem()` moves it back. This exists for sync —
-see below — and the store keeps the two lists separate precisely so the
-tombstones still reach the saved payload.
 
 ### Expiry tracking
 
@@ -364,22 +354,15 @@ Locking clears key material and decrypted state from memory.
 
 ### Sync
 
-Sync is optional and off by default. When enabled it can run manually or on an
-interval, and skips a run if one is already in flight.
+Sync is optional and off by default. It stores one encrypted JSON file in a
+GitHub repository; changed syncs create commits. A run skips if one is already
+in flight.
 
-A run is always **push-and-pull**:
-
-1. Ensure the container exists
-2. Acquire a **lease** on the blob
-3. Download and decrypt the remote envelope with the sync key
-4. **Merge** remote against local
-5. Re-encrypt the merged payload and upload
-6. Release the lease
-
-**The lease is not optional.** Without optimistic concurrency, two devices
-syncing at the same moment would each read the same remote, each merge their own
-local edits in, and the second upload would silently discard the first device's
-work. A `409` surfaces as a user-visible, retryable conflict instead.
+A run reads the remote file and its Git blob SHA, decrypts it, merges records
+per-item, and writes the encrypted merged payload back using that SHA. If another
+device updates the file between the read and write, the stale SHA is rejected
+and the sync reports a retryable conflict instead of silently overwriting it.
+An unchanged vault does not create an empty commit.
 
 **Merging is per record, not wholesale.** Each item and template resolves
 independently by `updatedAt`, with two refinements:
@@ -397,21 +380,25 @@ than a stale replica. Records both sides agree on are counted separately as
 newer payload. Per-key merging would produce a combination of settings that
 nobody ever chose.
 
-**The sync key is separate.** It is derived from a distinct sync email and
-password, not the master password, so a leaked sync credential does not
-compromise the master key. That password lives inside the master-key-encrypted
-payload — protected at rest — and `toSyncPayload()` strips it before upload. The
-blob is a pure replica of your data and carries no credential.
+**Remote encryption still uses the vault master password.** A KDF descriptor is
+included in the remote envelope, and the derived sync key is held in memory only
+for the unlocked session. The GitHub PAT is a separate repository credential;
+it authorizes file access but cannot decrypt the vault.
 
-### Credentials
+### GitHub credentials
 
-**Sync uses a Blob SAS URL.** Create a SAS with read, write, and lease
-permissions, scoped as narrowly as practical, and configure its expiry to match
-your needs. The SAS URL is encrypted in the local vault and is not included in
-the uploaded data. Service-, container-, and blob-scoped URLs are supported;
-container- and blob-scoped URLs must match the configured destination, and the
-container must already exist. A service-scoped URL needs container-create
-permission if Sandiman should create a missing container.
+Use a **private repository** and a fine-grained personal access token scoped to
+that repository with **Contents: read and write** permission. Configure the
+owner, repository, optional branch, encrypted-file path, and PAT in Sync
+settings. The PAT is stored only inside the locally encrypted vault and is
+removed by `toSyncPayload()` before upload. The local last-sync timestamp is
+also excluded, so a routine sync does not create a commit just to record that
+it ran. The PAT is never logged or placed in the remote file.
+
+GitHub commit history retains older encrypted copies even after a new version
+is committed or the current file is deleted. The Contents API has file-size
+limits; Sandiman rejects encrypted files over 70 MiB rather than attempting an
+unsupported upload. Repository and branch must already exist.
 
 ## Design decisions
 
@@ -427,7 +414,7 @@ proportional to the changed item rather than the full vault. The tradeoff is
 that someone inspecting IndexedDB can observe the number and approximate sizes
 of encrypted records, and notice which record changes. Random item IDs are the
 only item fields used as storage keys; content and labels stay encrypted.
-Azure sync remains a single encrypted payload and does not use this local
+GitHub sync remains a single encrypted payload and does not use this local
 record layout.
 
 **Tombstones are retained across saves.** This one is subtle and was a real bug.
@@ -451,7 +438,7 @@ What this defends against:
 
 - someone reading your IndexedDB
 - a leaked backup or disk image
-- the storage account, or anyone with access to it, seeing your data
+- the GitHub repository, or anyone with access to it, seeing your data
 
 All three get ciphertext.
 
@@ -469,9 +456,9 @@ promise safety from the device itself.
 
 ## Development status
 
-The build, the dev server, and the domain logic are verified — 109 unit tests
-cover crypto round-trips, merge semantics, expiry parsing, credential parsing,
-generation, and the storage lifecycle.
+The build, the dev server, and the domain logic are verified — unit tests cover
+crypto round-trips, merge semantics, expiry parsing, GitHub configuration and
+transport, generation, and the storage lifecycle.
 
 **The UI has not yet been exercised in a browser.** The rendered screens are
 unverified; treat them as untested. See `AGENTS.md` for the invariants a change

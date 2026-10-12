@@ -6,12 +6,17 @@
  * There is no recovery path, which is why the form asks for the current
  * password and confirms the new one twice.
  */
-import { useEffect, useState } from 'react'
-import { AlertTriangle, Loader2, Lock, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
+import { AlertTriangle, Download, FileUp, Loader2, Lock, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useVaultStore } from '@/state/vaultStore'
-import { changeMasterPassword, WrongPasswordError } from '@/storage/vaultService'
+import type { VaultItem } from '@/storage/types'
+import { parseLoginCsv } from '@/storage/csvImport'
+import { exportVaultCsv } from '@/storage/csvExport'
+import { changeMasterPassword, verifyMasterPassword, WrongPasswordError } from '@/storage/vaultService'
 import { destroyDatabase } from '@/storage/db'
+import { rotateSyncPassword } from '@/sync/syncEngine'
 import { estimateStrength } from '@/generator/password'
 import { DEFAULT_ITERATIONS } from '@/crypto/envelope'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -43,10 +48,13 @@ export function SettingsPanel({
   const settings = useVaultStore((state) => state.settings)
   const updateSettings = useVaultStore((state) => state.updateSettings)
   const lock = useVaultStore((state) => state.lock)
+  const syncConfig = useVaultStore((state) => state.sync.config)
   const templates = useVaultStore((state) => state.templates)
   const items = useVaultStore((state) => state.items)
   const deletedItems = useVaultStore((state) => state.deletedItems)
+  const addItems = useVaultStore((state) => state.addItems)
   const { theme, resolved, setTheme } = useTheme()
+  const csvInput = useRef<HTMLInputElement>(null)
 
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
@@ -55,6 +63,10 @@ export function SettingsPanel({
   const [changeError, setChangeError] = useState<string | null>(null)
 
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [csvItems, setCsvItems] = useState<VaultItem[]>([])
+  const [csvFileName, setCsvFileName] = useState('')
+  const [csvError, setCsvError] = useState<string | null>(null)
+  const [importingCsv, setImportingCsv] = useState(false)
 
   // Clear password fields whenever the panel closes.
   useEffect(() => {
@@ -64,6 +76,10 @@ export function SettingsPanel({
       setConfirm('')
       setChangeError(null)
       setConfirmDelete(false)
+      setCsvItems([])
+      setCsvFileName('')
+      setCsvError(null)
+      if (csvInput.current) csvInput.current.value = ''
     }
   }, [open])
 
@@ -76,9 +92,15 @@ export function SettingsPanel({
     setChanging(true)
     setChangeError(null)
     try {
+      if (!(await verifyMasterPassword(current))) {
+        throw new WrongPasswordError()
+      }
+      const rotatedRemote = await rotateSyncPassword(syncConfig, current, next)
       await changeMasterPassword(current, next)
       toast.success('Master password changed', {
-        description: 'Your vault has been re-encrypted with a fresh salt.',
+        description: rotatedRemote
+          ? 'Your vault and GitHub copy have been re-encrypted with the new password.'
+          : 'Your vault has been re-encrypted with a fresh salt.',
       })
       setCurrent('')
       setNext('')
@@ -110,6 +132,57 @@ export function SettingsPanel({
       toast.error('Could not delete the vault', {
         description: 'Another tab may still be open. Close it and try again.',
       })
+    }
+  }
+
+  async function handleCsvSelection(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0]
+    setCsvItems([])
+    setCsvError(null)
+    setCsvFileName(file?.name ?? '')
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      setCsvError('Choose a CSV file smaller than 5 MB.')
+      return
+    }
+    try {
+      setCsvItems(parseLoginCsv(await file.text()))
+    } catch (cause) {
+      setCsvError(cause instanceof Error ? cause.message : 'Could not read this CSV file')
+    }
+  }
+
+  async function handleCsvImport(): Promise<void> {
+    if (csvItems.length === 0 || importingCsv) return
+    setImportingCsv(true)
+    try {
+      await addItems(csvItems)
+      toast.success(`Imported ${csvItems.length} ${csvItems.length === 1 ? 'item' : 'items'}`)
+      setCsvItems([])
+      setCsvFileName('')
+      if (csvInput.current) csvInput.current.value = ''
+    } finally {
+      setImportingCsv(false)
+    }
+  }
+
+  function handleCsvExport(): void {
+    if (items.length === 0) return
+    try {
+      const csv = exportVaultCsv(items, templates)
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `sandiman-vault-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.append(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      toast.success('CSV export downloaded', {
+        description: 'The file is unencrypted. Keep it somewhere secure.',
+      })
+    } catch {
+      toast.error('Could not export the vault as CSV')
     }
   }
 
@@ -206,6 +279,84 @@ export function SettingsPanel({
                 <ToggleThemeButton resolved={resolved} />
               </div>
             </div>
+          </section>
+
+          <Separator />
+
+          <section className="space-y-3">
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold">Import from CSV</h3>
+              <p className="text-muted-foreground text-xs">
+                Import rows as Login items. Include a header row; extra columns are kept as
+                custom fields. Imports add items and never replace existing entries.
+              </p>
+              <p className="text-muted-foreground text-xs">
+                The CSV is read only in this browser. Keep the source file secure because it may
+                contain passwords in plain text.
+              </p>
+            </div>
+            <input
+              ref={csvInput}
+              type="file"
+              accept=".csv,text/csv"
+              className="sr-only"
+              aria-label="Choose CSV file"
+              onChange={(event) => void handleCsvSelection(event)}
+            />
+            <Button variant="outline" onClick={() => csvInput.current?.click()}>
+              <FileUp />
+              Choose CSV file
+            </Button>
+            {csvFileName ? (
+              <p className="text-muted-foreground truncate text-xs" title={csvFileName}>
+                {csvFileName}
+              </p>
+            ) : null}
+            {csvError ? (
+              <Alert variant="destructive">
+                <AlertTriangle />
+                <AlertTitle>Could not import CSV</AlertTitle>
+                <AlertDescription>{csvError}</AlertDescription>
+              </Alert>
+            ) : null}
+            {csvItems.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-sm">
+                  {csvItems.length} {csvItems.length === 1 ? 'item' : 'items'} ready to import
+                </p>
+                <ul className="text-muted-foreground max-h-24 space-y-1 overflow-y-auto text-xs">
+                  {csvItems.slice(0, 3).map((item) => (
+                    <li key={item.id} className="truncate">{item.title}</li>
+                  ))}
+                  {csvItems.length > 3 ? <li>And {csvItems.length - 3} more…</li> : null}
+                </ul>
+                <Button onClick={() => void handleCsvImport()} loading={importingCsv}>
+                  {importingCsv ? <Loader2 className="animate-spin" /> : <FileUp />}
+                  Import {csvItems.length} {csvItems.length === 1 ? 'item' : 'items'}
+                </Button>
+              </div>
+            ) : null}
+          </section>
+
+          <Separator />
+
+          <section className="space-y-3">
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold">Export to CSV</h3>
+              <p className="text-muted-foreground text-xs">
+                Downloads all {items.length} active {items.length === 1 ? 'item' : 'items'},
+                including passwords and other secret values. Deleted items held for sync are
+                excluded.
+              </p>
+              <p className="text-destructive text-xs">
+                CSV files are unencrypted plain text. Store the download securely and delete it
+                when you no longer need it.
+              </p>
+            </div>
+            <Button variant="outline" disabled={items.length === 0} onClick={handleCsvExport}>
+              <Download />
+              Download CSV
+            </Button>
           </section>
 
           <Separator />
@@ -331,7 +482,7 @@ export function SettingsPanel({
                 <AlertDescription className="space-y-2">
                   <p>
                     Deleting removes the encrypted vault from this browser. If it has
-                    been synced to Azure, a copy may still exist there.
+                    been synced to GitHub, encrypted copies may remain in its commit history.
                   </p>
                   <div className="flex gap-2">
                     <Button

@@ -1,4 +1,4 @@
-import type { AzureSyncConfig } from '@/sync/types'
+import type { GitHubSyncConfig } from '@/sync/types'
 
 /**
  * Core vault domain model.
@@ -119,14 +119,14 @@ export const DEFAULT_SETTINGS: VaultSettings = {
 }
 
 /**
- * Azure destination settings, held inside the master-key-encrypted payload.
+ * GitHub destination settings, held inside the master-key-encrypted payload.
  * These are local-only and stripped before anything is uploaded.
  */
 export interface StoredSyncSettings {
-  config: AzureSyncConfig
+  config: GitHubSyncConfig
 }
 
-/** The decrypted vault body used in memory and as the Azure sync payload. */
+/** The decrypted vault body used in memory and as the GitHub sync payload. */
 export interface VaultPayload {
   version: number
   items: VaultItem[]
@@ -145,7 +145,8 @@ export const VAULT_PAYLOAD_VERSION = 1
 /**
  * Projects the vault body onto the subset shared with other devices.
  *
- * Azure configuration is excluded so no SAS URL reaches the blob.
+ * GitHub credentials and the local sync timestamp are excluded so neither the
+ * PAT nor sync-only bookkeeping creates a remote commit.
  */
 export function toSyncPayload(payload: VaultPayload): Omit<VaultPayload, 'sync'> {
   const {
@@ -153,5 +154,5 @@ export function toSyncPayload(payload: VaultPayload): Omit<VaultPayload, 'sync'>
     localItemCount: _localItemCount,
     ...shared
   } = payload
-  return shared
+  return { ...shared, settings: { ...shared.settings, lastSyncAt: null } }
 }

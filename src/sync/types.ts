@@ -1,42 +1,48 @@
 /**
- * Azure Blob Storage sync configuration.
+ * GitHub repository sync configuration.
  *
- * Only the Azure destination and SAS URL are stored. Remote data is
- * encrypted with a key derived from the vault master password.
+ * The personal access token lives only inside the master-key-encrypted local
+ * vault and is stripped before anything is uploaded. Remote data is encrypted
+ * with a key derived from the vault master password.
  */
-export interface AzureSyncConfig {
-  /** Container to read and write. Service-scoped SAS URLs can create it if absent. */
-  containerName: string
-  /** Blob holding the encrypted envelope. */
-  blobName: string
-  /** Full Azure Blob SAS URL, encrypted with the local vault. */
-  sasUrl: string
+export interface GitHubSyncConfig {
+  /** Account or organisation that owns the repository. */
+  owner: string
+  repo: string
+  /** Blank means the repository's default branch. */
+  branch: string
+  /** Path of the encrypted vault file inside the repository. */
+  path: string
+  /** Personal access token with Contents read/write access to the repository. */
+  token: string
   /** Enable background sync on an interval. */
   autoSync: boolean
   autoSyncMinutes: number
 }
 
-export const DEFAULT_BLOB_NAME = 'vault-encrypted.json'
-export const DEFAULT_CONTAINER_NAME = 'sandiman-vault'
+export const DEFAULT_VAULT_PATH = 'vault-encrypted.json'
 
-export const DEFAULT_AZURE_SYNC_CONFIG: AzureSyncConfig = {
-  containerName: DEFAULT_CONTAINER_NAME,
-  blobName: DEFAULT_BLOB_NAME,
-  sasUrl: '',
+export const DEFAULT_GITHUB_SYNC_CONFIG: GitHubSyncConfig = {
+  owner: '',
+  repo: '',
+  branch: '',
+  path: DEFAULT_VAULT_PATH,
+  token: '',
   autoSync: false,
-  autoSyncMinutes: 5,
+  autoSyncMinutes: 15,
 }
 
-/** Sync is incomplete if any Azure destination credential is blank. */
-export function missingSyncFields(config: AzureSyncConfig): string[] {
+/** Sync is incomplete if any required GitHub destination field is blank. */
+export function missingSyncFields(config: GitHubSyncConfig): string[] {
   const missing: string[] = []
-  if (!config.sasUrl.trim()) missing.push('Blob SAS URL')
-  if (!config.containerName.trim()) missing.push('Container name')
-  if (!config.blobName.trim()) missing.push('Blob name')
+  if (!config.token.trim()) missing.push('Personal access token')
+  if (!config.owner.trim()) missing.push('Repository owner')
+  if (!config.repo.trim()) missing.push('Repository name')
+  if (!config.path.trim()) missing.push('File path')
   return missing
 }
 
-export function isSyncConfigured(config: AzureSyncConfig): boolean {
+export function isSyncConfigured(config: GitHubSyncConfig): boolean {
   return missingSyncFields(config).length === 0
 }
 
@@ -55,7 +61,7 @@ export interface SyncOutcome {
   itemsSent: number
   templatesReceived: number
   templatesSent: number
-  /** True when the remote blob was newer than anything held locally. */
+  /** True when the remote file was newer than anything held locally. */
   remoteWasNewer: boolean
   completedAt: number
 }

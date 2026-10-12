@@ -195,8 +195,8 @@ describe('mergePayloads', () => {
   })
 
   it('never carries local sync settings into the result', () => {
-    const local = { ...payload([], [], 100), sync: { config: { sasUrl: 'local-secret' } as never } }
-    const remote = { ...payload([], [], 100), sync: { config: { sasUrl: 'remote-secret' } as never } }
+    const local = { ...payload([], [], 100), sync: { config: { token: 'local-secret' } as never } }
+    const remote = { ...payload([], [], 100), sync: { config: { token: 'remote-secret' } as never } }
 
     const result = mergePayloads(local, remote)
 

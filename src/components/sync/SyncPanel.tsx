@@ -1,9 +1,4 @@
-/**
- * Azure Blob Storage sync panel.
- *
- * Azure settings are stored inside the master-key-encrypted vault payload and
- * stripped before upload. Browser sync uses a Blob SAS URL.
- */
+/** GitHub repository sync settings and controls. */
 import { useMemo, useState } from 'react'
 import {
   AlertTriangle,
@@ -14,7 +9,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { describeCredential, readAccountName } from '@/sync/credentialParsing'
+import { describeDestination } from '@/sync/githubConfig'
 import { SyncError, runSync, verifySyncCredentials } from '@/sync/syncEngine'
 import { isSyncConfigured, missingSyncFields } from '@/sync/types'
 import { useVaultStore } from '@/state/vaultStore'
@@ -54,14 +49,14 @@ export function SyncPanel({
   const applyMergedPayload = useVaultStore((state) => state.applyMergedPayload)
 
   const [masterPassword, setMasterPassword] = useState('')
+  const [previousMasterPassword, setPreviousMasterPassword] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [verification, setVerification] = useState<{ ok: boolean; text: string } | null>(null)
   const [lastRun, setLastRun] = useState<string | null>(null)
 
   const missing = useMemo(() => missingSyncFields(config), [config])
-  const credential = useMemo(() => describeCredential(config), [config])
-  const account = useMemo(() => readAccountName(config), [config])
+  const destination = useMemo(() => describeDestination(config), [config])
 
   async function handleVerify(): Promise<void> {
     setVerifying(true)
@@ -69,8 +64,8 @@ export function SyncPanel({
     try {
       const result = await verifySyncCredentials(config)
       setVerification({ ok: result.ok, text: result.summary })
-      if (result.ok) toast.success('Storage is reachable')
-      else toast.error('Could not reach the vault', { description: result.summary })
+      if (result.ok) toast.success('GitHub repository is reachable')
+      else toast.error('Could not access the GitHub repository', { description: result.summary })
     } finally {
       setVerifying(false)
     }
@@ -86,6 +81,7 @@ export function SyncPanel({
       const result = await runSync({
         config,
         masterPassword,
+        previousMasterPassword,
         payload: {
           version: VAULT_PAYLOAD_VERSION,
           items: [...items, ...deletedItems],
@@ -96,28 +92,25 @@ export function SyncPanel({
         },
       })
 
-      // Keep this device's own Azure configuration, which the remote blob never carried.
-      await applyMergedPayload({
-        ...result.mergedPayload,
-        sync: { config },
-      })
+      // Keep this device's PAT and repository configuration; neither is uploaded.
+      await applyMergedPayload({ ...result.mergedPayload, sync: { config } })
       await updateSettings({ lastSyncAt: result.outcome.completedAt })
 
       const { outcome, initialUpload } = result
       const summary = initialUpload
-        ? 'First sync complete. The vault blob was created.'
+        ? 'First sync complete. The encrypted vault file was created in GitHub.'
         : outcome.itemsReceived > 0 || outcome.templatesReceived > 0
-          ? `Pulled ${outcome.itemsReceived} item(s) from the remote and kept ${outcome.itemsSent} local change(s).`
-          : 'Everything is already up to date.'
+          ? `Pulled ${outcome.itemsReceived} item(s) from GitHub and kept ${outcome.itemsSent} local change(s).`
+          : outcome.direction === 'push'
+            ? 'Encrypted vault changes committed to GitHub.'
+            : 'Everything is already up to date.'
 
       setLastRun(summary)
       setMasterPassword('')
-      toast.success(initialUpload ? 'Vault uploaded' : 'Sync complete', {
-        description: summary,
-      })
+      setPreviousMasterPassword('')
+      toast.success(initialUpload ? 'Vault uploaded' : 'Sync complete', { description: summary })
     } catch (cause) {
-      const message =
-        cause instanceof SyncError ? cause.message : 'The sync could not be completed'
+      const message = cause instanceof SyncError ? cause.message : 'The sync could not be completed'
       toast.error('Sync failed', { description: message })
       setLastRun(message)
     } finally {
@@ -129,24 +122,95 @@ export function SyncPanel({
     <Sheet
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) setMasterPassword('')
+        if (!nextOpen) {
+          setMasterPassword('')
+          setPreviousMasterPassword('')
+        }
         onOpenChange(nextOpen)
       }}
     >
       <SheetContent side="right">
         <SheetHeader>
-          <SheetTitle>Sync to Azure Blob Storage</SheetTitle>
+          <SheetTitle>Sync to GitHub</SheetTitle>
           <SheetDescription>
-            Your vault is encrypted with a key derived from your master password
-            before upload. Use the same master password on each device; Azure only
-            receives ciphertext. Changing your master password makes existing remote
-            data unreadable until it is migrated.
+            GitHub stores one encrypted vault file in your repository. Use a private repository;
+            GitHub commit history retains older encrypted copies. Your PAT is encrypted inside
+            this device’s vault and is never uploaded.
           </SheetDescription>
         </SheetHeader>
 
         <div className="scrollbar-slim flex-1 space-y-5 overflow-y-auto p-6">
           <div className="space-y-2">
-            <Label htmlFor="sync-master-password">Master password</Label>
+            <Label htmlFor="sync-owner">Repository owner</Label>
+            <Input
+              id="sync-owner"
+              value={config.owner}
+              onChange={(event) => updateSyncConfig({ owner: event.target.value })}
+              placeholder="username or organisation"
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="sync-repo">Repository</Label>
+              <Input
+                id="sync-repo"
+                value={config.repo}
+                onChange={(event) => updateSyncConfig({ repo: event.target.value })}
+                placeholder="private-vault"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sync-branch">Branch (optional)</Label>
+              <Input
+                id="sync-branch"
+                value={config.branch}
+                onChange={(event) => updateSyncConfig({ branch: event.target.value })}
+                placeholder="default branch"
+                autoComplete="off"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sync-path">Encrypted file path</Label>
+            <Input
+              id="sync-path"
+              value={config.path}
+              onChange={(event) => updateSyncConfig({ path: event.target.value })}
+              placeholder="vault-encrypted.json"
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sync-token">GitHub personal access token</Label>
+            <PasswordInput
+              id="sync-token"
+              value={config.token}
+              onChange={(event) => updateSyncConfig({ token: event.target.value })}
+              placeholder="github_pat_…"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <p className="text-muted-foreground text-xs">
+              Use a fine-grained token restricted to this repository with Contents read/write access.
+              <a
+                className="text-primary ml-1 underline underline-offset-2"
+                href="https://github.com/settings/personal-access-tokens/new"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Create a token
+              </a>
+              . The token is stored only inside your encrypted local vault.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sync-master-password">Vault master password</Label>
             <PasswordInput
               id="sync-master-password"
               value={masterPassword}
@@ -155,44 +219,24 @@ export function SyncPanel({
               spellCheck={false}
             />
             <p className="text-muted-foreground text-xs">
-              Needed when syncing for the first time on this device after unlocking.
-              It is used only in memory and is never saved with sync settings.
+              Needed for the first sync after unlock. It derives the remote encryption key and is
+              used only in memory.
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="sync-sas-url">Blob SAS URL</Label>
-            <TextareaLike
-              id="sync-sas-url"
-              value={config.sasUrl}
-              onChange={(value) => updateSyncConfig({ sasUrl: value })}
-              placeholder="https://<account>.blob.core.windows.net/?sv=...&sig=..."
-              rows={3}
+            <Label htmlFor="sync-previous-password">Previous master password (if needed)</Label>
+            <PasswordInput
+              id="sync-previous-password"
+              value={previousMasterPassword}
+              onChange={(event) => setPreviousMasterPassword(event.target.value)}
+              autoComplete="off"
+              spellCheck={false}
             />
             <p className="text-muted-foreground text-xs">
-              Use a SAS URL with read, write, and lease permissions. Service-scoped
-              URLs also need create permission if the container is missing. Container-
-              or blob-scoped URLs must match the destination, and the container must exist.
+              If this vault password was changed before GitHub was re-encrypted, enter the password
+              that protected the GitHub copy. It is used once to migrate that copy to your current password.
             </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="sync-container">Container</Label>
-              <Input
-                id="sync-container"
-                value={config.containerName}
-                onChange={(event) => updateSyncConfig({ containerName: event.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="sync-blob">Blob name</Label>
-              <Input
-                id="sync-blob"
-                value={config.blobName}
-                onChange={(event) => updateSyncConfig({ blobName: event.target.value })}
-              />
-            </div>
           </div>
 
           <Separator />
@@ -212,8 +256,8 @@ export function SyncPanel({
             {config.autoSync ? (
               <div className="space-y-2">
                 <p className="text-muted-foreground text-xs">
-                  Automatic sync uses a temporary key after a successful manual sync.
-                  Sync manually once after each unlock to enable it for that session.
+                  Automatic sync uses the in-memory key after one successful manual sync each time
+                  you unlock. A changed vault file creates a GitHub commit.
                 </p>
                 <Label htmlFor="sync-interval">Every (minutes)</Label>
                 <Input
@@ -223,7 +267,7 @@ export function SyncPanel({
                   max={1440}
                   value={config.autoSyncMinutes}
                   onChange={(event) =>
-                    updateSyncConfig({ autoSyncMinutes: Number(event.target.value) || 5 })
+                    updateSyncConfig({ autoSyncMinutes: Number(event.target.value) || 15 })
                   }
                 />
               </div>
@@ -234,11 +278,11 @@ export function SyncPanel({
 
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Connection</span>
-              {credential.ok ? (
+              <span className="text-sm font-medium">Destination</span>
+              {destination.ok ? (
                 <Badge variant="success">
                   <CheckCircle2 />
-                  {account || 'configured'}
+                  configured
                 </Badge>
               ) : (
                 <Badge variant="destructive">
@@ -247,7 +291,7 @@ export function SyncPanel({
                 </Badge>
               )}
             </div>
-            <p className="text-muted-foreground text-xs">{credential.summary}</p>
+            <p className="text-muted-foreground text-xs">{destination.summary}</p>
 
             {verification ? (
               <Alert variant={verification.ok ? 'success' : 'destructive'}>
@@ -267,7 +311,6 @@ export function SyncPanel({
                 {verifying ? <Loader2 className="animate-spin" /> : null}
                 Test connection
               </Button>
-
               <Button
                 size="sm"
                 onClick={() => void handleSync()}
@@ -308,7 +351,7 @@ export function SyncPanel({
             onClick={() => {
               setMasterPassword('')
               onOpenChange(false)
-              toast.success('Sync settings saved')
+              toast.success('GitHub sync settings saved')
             }}
           >
             Save
@@ -316,32 +359,5 @@ export function SyncPanel({
         </SheetFooter>
       </SheetContent>
     </Sheet>
-  )
-}
-
-/** Multiline credential input, used because SAS URLs are long. */
-function TextareaLike({
-  id,
-  value,
-  onChange,
-  placeholder,
-  rows = 2,
-}: {
-  id: string
-  value: string
-  onChange: (value: string) => void
-  placeholder?: string
-  rows?: number
-}) {
-  return (
-    <textarea
-      id={id}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      rows={rows}
-      spellCheck={false}
-      className="border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 min-h-16 w-full resize-y rounded-md border bg-transparent px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:ring-[3px]"
-    />
   )
 }

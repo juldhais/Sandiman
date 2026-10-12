@@ -6,7 +6,7 @@
  * definitions. Adding a field to a template makes it appear here with no code
  * change.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { z } from 'zod'
@@ -157,6 +157,18 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
     defaultValues,
     mode: 'onSubmit',
   })
+
+  // React Hook Form only applies defaultValues on the first render. Template
+  // fields added later would otherwise be controlled as empty strings in the
+  // UI while their form state remained undefined, causing validation errors
+  // when focusing another control (such as the password generator).
+  useEffect(() => {
+    for (const field of allResolved) {
+      if (form.getValues(field.id) === undefined) {
+        form.setValue(field.id, field.value)
+      }
+    }
+  }, [allResolved, form])
 
   const values = form.watch()
 
@@ -428,7 +440,10 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
                   onBlur={() => form.trigger(field.id as keyof FormValues)}
                   onGenerate={
                     field.def.type === 'masked'
-                      ? (password) => form.setValue(field.id as keyof FormValues, password)
+                      ? (password) =>
+                          form.setValue(field.id as keyof FormValues, password, {
+                            shouldValidate: true,
+                          })
                       : undefined
                   }
                   clearAfterSeconds={settings.clipboardClearSeconds}

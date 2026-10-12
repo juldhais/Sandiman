@@ -4,7 +4,7 @@
  * This module owns the one invariant that matters most: the derived master key
  * lives only as a local variable or in the store's memory, and is never
  * written to storage. Local item records and their header are encrypted
- * independently; Azure sync continues to use one encrypted payload envelope.
+ * independently; GitHub sync continues to use one encrypted payload envelope.
  */
 import { DecryptError, decryptRecord, decryptVault, encryptRecord, encryptVault } from '@/crypto/aes'
 import { createKdfParams, deriveKey } from '@/crypto/kdf'
@@ -24,7 +24,7 @@ import {
   VAULT_PAYLOAD_VERSION,
   type VaultPayload,
 } from './types'
-import { DEFAULT_AZURE_SYNC_CONFIG } from '@/sync/types'
+import { DEFAULT_GITHUB_SYNC_CONFIG } from '@/sync/types'
 
 export type VaultState = 'uninitialized' | 'locked' | 'unlocked'
 
@@ -66,7 +66,7 @@ export function emptyPayload(now: number = Date.now()): VaultPayload {
     settings: { ...DEFAULT_SETTINGS },
     updatedAt: now,
     sync: {
-      config: { ...DEFAULT_AZURE_SYNC_CONFIG },
+      config: { ...DEFAULT_GITHUB_SYNC_CONFIG },
     },
   }
 }
