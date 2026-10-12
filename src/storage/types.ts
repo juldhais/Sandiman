@@ -126,7 +126,7 @@ export interface StoredSyncSettings {
   config: AzureSyncConfig
 }
 
-/** The decrypted vault body, encrypted into a single envelope. */
+/** The decrypted vault body used in memory and as the Azure sync payload. */
 export interface VaultPayload {
   version: number
   items: VaultItem[]
@@ -135,6 +135,8 @@ export interface VaultPayload {
   updatedAt: number
   /** Local-only; stripped before sync. */
   sync?: StoredSyncSettings
+  /** Encrypted integrity check for the number of separately stored items. */
+  localItemCount?: number
 }
 
 /** Payload version, bumped when the item/template shape changes incompatibly. */
@@ -146,6 +148,10 @@ export const VAULT_PAYLOAD_VERSION = 1
  * Azure configuration is excluded so no SAS URL reaches the blob.
  */
 export function toSyncPayload(payload: VaultPayload): Omit<VaultPayload, 'sync'> {
-  const { sync: _sync, ...shared } = payload
+  const {
+    sync: _sync,
+    localItemCount: _localItemCount,
+    ...shared
+  } = payload
   return shared
 }

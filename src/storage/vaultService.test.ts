@@ -1,10 +1,17 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { getVaultState, savePayload, unlock, WrongPasswordError } from '@/storage/vaultService'
-import { readEnvelope, setMetaEntries, META_KEYS } from '@/storage/db'
+import {
+  getHeaderSignature,
+  getVaultState,
+  savePayload,
+  savePayloadChanges,
+  unlock,
+  WrongPasswordError,
+} from '@/storage/vaultService'
+import { readEnvelope, readItemRecords } from '@/storage/db'
 import { emptyPayload } from '@/storage/vaultService'
 import { VAULT_PAYLOAD_VERSION, type VaultPayload } from '@/storage/types'
-import { decryptVault } from '@/crypto/aes'
+import { decryptRecord, decryptVault } from '@/crypto/aes'
 import { createKdfParams } from '@/crypto/kdf'
 import { decodeBase64 } from '@/crypto/base64'
 
@@ -38,15 +45,7 @@ async function derive(password: string, params: ReturnType<typeof createKdfParam
 async function seed(password: string, payload: VaultPayload): Promise<void> {
   const kdf = createKdfParams({ iterations: 1000 })
   const key = await derive(password, kdf)
-  const { encryptVault } = await import('@/crypto/aes')
-  const envelope = await encryptVault(payload, key, kdf)
-
-  const { writeEnvelope } = await import('@/storage/db')
-  await writeEnvelope(envelope, Date.now())
-  await setMetaEntries({
-    [META_KEYS.initialized]: true,
-    [META_KEYS.masterKdf]: kdf,
-  })
+  await savePayload(payload, key, kdf)
 }
 
 describe('vault storage lifecycle', () => {
@@ -81,15 +80,19 @@ describe('vault storage lifecycle', () => {
 
     await seed('master-password', payload)
 
-    // Read the envelope back the way the unlock path does.
+    // The header and item record are independently encrypted.
     const envelope = await readEnvelope()
     expect(envelope).not.toBeNull()
 
     const kdf = envelope!.kdf
     const key = await derive('master-password', kdf)
-    const decrypted = (await decryptVault(envelope!, key)) as VaultPayload
+    const decrypted = await decryptRecord<{ values: Record<string, string> }>(
+      (await readItemRecords())[0]!.ciphertext,
+      key,
+      'item:i1',
+    )
 
-    expect(decrypted.items[0]!.values.password).toBe('hunter2')
+    expect(decrypted.values.password).toBe('hunter2')
   })
 
   it('keeps the ciphertext opaque in storage', async () => {
@@ -112,10 +115,62 @@ describe('vault storage lifecycle', () => {
     })
 
     const envelope = await readEnvelope()
-    const serialised = JSON.stringify(envelope)
+    const records = await readItemRecords()
+    const serialised = JSON.stringify({ envelope, records })
 
     expect(serialised).not.toContain('do-not-leak')
     expect(serialised).not.toContain('Secret entry')
+  })
+
+  it('rewrites only changed item ciphertext during an incremental save', async () => {
+    const payload = {
+      ...emptyPayload(1000),
+      items: [
+        {
+          id: 'item-a', templateId: null, title: 'First', values: { password: 'secret-a' },
+          customFields: [], tags: [], notes: '', createdAt: 1, updatedAt: 1, deleted: false,
+        },
+        {
+          id: 'item-b', templateId: null, title: 'Second', values: { password: 'secret-b' },
+          customFields: [], tags: [], notes: '', createdAt: 2, updatedAt: 2, deleted: false,
+        },
+      ],
+    }
+    const kdf = createKdfParams({ iterations: 1000 })
+    const key = await derive('master-password', kdf)
+    await savePayload(payload, key, kdf, 1000)
+    const before = await readItemRecords()
+    const unchangedCiphertext = before.find((record) => record.id === 'item-b')!.ciphertext
+    const headerEnvelope = await readEnvelope()
+    const header = await decryptVault(headerEnvelope!, key)
+    expect((header as unknown as { localItemCount: number }).localItemCount).toBe(2)
+    expect(header.items).toEqual([])
+    expect(JSON.stringify([headerEnvelope, before])).not.toContain('secret-a')
+    expect(JSON.stringify([headerEnvelope, before])).not.toContain('First')
+    const changed = { ...payload.items[0]!, notes: 'edited', updatedAt: 3 }
+    const nextPayload = { ...payload, items: [changed, payload.items[1]!] }
+
+    await savePayloadChanges(
+      nextPayload,
+      key,
+      kdf,
+      [changed],
+      [],
+      getHeaderSignature(payload) !== getHeaderSignature(nextPayload),
+      2000,
+    )
+
+    const after = await readItemRecords()
+    expect(after.find((record) => record.id === 'item-b')!.ciphertext).toEqual(unchangedCiphertext)
+    expect(after.find((record) => record.id === 'item-a')!.ciphertext).not.toEqual(
+      before.find((record) => record.id === 'item-a')!.ciphertext,
+    )
+    await expect(
+      decryptRecord(after.find((record) => record.id === 'item-a')!.ciphertext, key, 'item:item-a'),
+    ).resolves.toMatchObject({ notes: 'edited' })
+    await expect(
+      decryptRecord(after.find((record) => record.id === 'item-a')!.ciphertext, key, 'item:item-b'),
+    ).rejects.toMatchObject({ reason: 'corrupt-payload' })
   })
 
   it('derives a different envelope after a save', async () => {

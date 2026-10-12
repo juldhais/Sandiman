@@ -99,6 +99,7 @@ export const vaultPayloadSchema = z.object({
   settings: settingsSchema,
   updatedAt: epochMs(0),
   sync: storedSyncSettingsSchema.optional(),
+  localItemCount: z.number().int().min(0).optional(),
 })
 
 export type ParsedVaultPayload = z.infer<typeof vaultPayloadSchema>

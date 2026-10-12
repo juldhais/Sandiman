@@ -12,6 +12,7 @@ import {
   IV_BYTES,
   type Envelope,
   type KdfParams,
+  type RecordCiphertext,
   type VaultPayload,
 } from './envelope'
 import { randomBytes } from './secureRandom'
@@ -61,9 +62,9 @@ function isEnvelope(value: unknown): value is Envelope {
 /**
  * Encrypts a vault payload.
  *
- * A fresh 96-bit IV is drawn per call. Reusing an IV under the same key would
- * be catastrophic for GCM, and since a fresh key is derived per encryption
- * cycle here, the pair is never reused in practice.
+ * A fresh random 96-bit IV is drawn per call. Reusing an IV under the same key
+ * would be catastrophic for GCM; random 96-bit nonces make collisions
+ * negligibly unlikely at the number of records a browser vault can hold.
  */
 export async function encryptVault(
   payload: VaultPayload,
@@ -130,6 +131,66 @@ export async function decryptVault(envelope: Envelope, key: CryptoKey): Promise<
     return parsed as VaultPayload
   } catch {
     throw new DecryptError('corrupt-payload', 'Decrypted bytes are not a vault payload')
+  }
+}
+
+/** Encrypts one local record, binding its type and ID to the authentication tag. */
+export async function encryptRecord(
+  value: unknown,
+  key: CryptoKey,
+  context: string,
+): Promise<RecordCiphertext> {
+  const iv = randomBytes(IV_BYTES)
+  const plaintext = new TextEncoder().encode(JSON.stringify(value))
+  const additionalData = new TextEncoder().encode(`sandiman:${context}`)
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData },
+    key,
+    plaintext,
+  )
+  return { v: ENVELOPE_VERSION, iv: encodeBase64(iv), data: encodeBase64(new Uint8Array(ciphertext)) }
+}
+
+/** Decrypts one local record and rejects swapped IDs or record types. */
+export async function decryptRecord<T>(
+  record: RecordCiphertext,
+  key: CryptoKey,
+  context: string,
+): Promise<T> {
+  if (
+    typeof record !== 'object' || record === null || record.v !== ENVELOPE_VERSION ||
+    typeof record.iv !== 'string' || typeof record.data !== 'string'
+  ) {
+    throw new DecryptError('corrupt-payload', 'Local record has an unexpected shape')
+  }
+
+  let iv: Uint8Array<ArrayBuffer>
+  let ciphertext: Uint8Array<ArrayBuffer>
+  try {
+    iv = decodeBase64(record.iv)
+    ciphertext = decodeBase64(record.data)
+  } catch {
+    throw new DecryptError('corrupt-payload', 'Local record fields are not valid base64')
+  }
+  if (iv.length !== IV_BYTES) {
+    throw new DecryptError('corrupt-payload', `Expected a ${IV_BYTES}-byte IV, got ${iv.length}`)
+  }
+
+  let plaintext: ArrayBuffer
+  try {
+    plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(`sandiman:${context}`) },
+      key,
+      ciphertext,
+    )
+  } catch {
+    throw new DecryptError('corrupt-payload', 'A local record failed authentication')
+  }
+
+  try {
+    return JSON.parse(new TextDecoder().decode(plaintext)) as T
+  } catch {
+    throw new DecryptError('corrupt-payload', 'A local record is not valid JSON')
   }
 }
 

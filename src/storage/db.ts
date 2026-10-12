@@ -3,8 +3,9 @@
  *
  * Two stores, deliberately separated:
  *
- *  - `vault` holds one record: the encrypted envelope. Unlocking is therefore
- *    a single key-value read rather than a per-item fetch.
+ *  - `vault` holds the encrypted header (templates/settings).
+ *  - `items` holds one authenticated ciphertext per item, keyed only by its
+ *    random ID. Neither IDs nor other item metadata are indexed.
  *  - `meta` holds unencrypted *bookkeeping only* — the KDF descriptor and
  *    timestamps. The salt and iteration count are not secret; the ciphertext
  *    is. Nothing here reveals vault contents.
@@ -12,15 +13,16 @@
  * Azure sync configuration is stored inside the master-key-encrypted payload.
  */
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
-import type { Envelope } from '@/crypto/envelope'
+import type { Envelope, KdfParams, RecordCiphertext } from '@/crypto/envelope'
 
 export const DATABASE_NAME = 'sandiman'
 export const DATABASE_VERSION = 1
 
 export const VAULT_STORE = 'vault'
 export const META_STORE = 'meta'
+export const ITEM_STORE = 'items'
 
-/** Key of the single vault record. The vault is a singleton by design. */
+/** Key of the encrypted header record. The vault is a singleton by design. */
 export const VAULT_KEY = 'primary'
 
 /** Keys within the meta store. */
@@ -49,6 +51,11 @@ export interface VaultRecord {
   updatedAt: number
 }
 
+export interface StoredItemRecord {
+  id: string
+  ciphertext: RecordCiphertext
+}
+
 interface SandimanDB extends DBSchema {
   [VAULT_STORE]: {
     key: string
@@ -57,6 +64,10 @@ interface SandimanDB extends DBSchema {
   [META_STORE]: {
     key: string
     value: unknown
+  }
+  [ITEM_STORE]: {
+    key: string
+    value: StoredItemRecord
   }
 }
 
@@ -71,6 +82,9 @@ function getDB(): Promise<IDBPDatabase<SandimanDB>> {
         }
         if (!db.objectStoreNames.contains(META_STORE)) {
           db.createObjectStore(META_STORE)
+        }
+        if (!db.objectStoreNames.contains(ITEM_STORE)) {
+          db.createObjectStore(ITEM_STORE, { keyPath: 'id' })
         }
       },
     })
@@ -113,16 +127,71 @@ export async function readEnvelope(): Promise<Envelope | null> {
   return record?.envelope ?? null
 }
 
-/** Persists the encrypted envelope and stamps the write time. */
-export async function writeEnvelope(envelope: Envelope, now: number = Date.now()): Promise<void> {
+/** Returns every encrypted item record. No item content is indexed. */
+export async function readItemRecords(): Promise<StoredItemRecord[]> {
   const db = await getDB()
-  const tx = db.transaction([VAULT_STORE, META_STORE], 'readwrite')
+  return db.getAll(ITEM_STORE)
+}
+
+/**
+ * Writes changed encrypted records and optionally replaces the encrypted
+ * header. All ciphertext is prepared before this transaction is opened so the
+ * transaction stays live and the header/items commit atomically.
+ */
+export async function writeLocalChanges(input: {
+  header?: Envelope
+  upserts: StoredItemRecord[]
+  deletes?: string[]
+  kdf: KdfParams
+  now?: number
+}): Promise<void> {
+  const db = await getDB()
+  const now = input.now ?? Date.now()
+  const tx = db.transaction([VAULT_STORE, ITEM_STORE, META_STORE], 'readwrite')
+  if (input.header) {
+    await tx.objectStore(VAULT_STORE).put({
+      key: VAULT_KEY,
+      envelope: input.header,
+      updatedAt: now,
+    } satisfies VaultRecord)
+  }
+  const items = tx.objectStore(ITEM_STORE)
+  await Promise.all([
+    ...input.upserts.map((record) => items.put(record)),
+    ...(input.deletes ?? []).map((id) => items.delete(id)),
+    tx.objectStore(META_STORE).put(input.kdf, META_KEYS.masterKdf),
+    tx.objectStore(META_STORE).put(now, META_KEYS.lastLocalWriteAt),
+  ])
+  await tx.done
+}
+
+/** Atomically installs a complete per-item vault, used at creation and re-keying. */
+export async function replaceLocalVault(input: {
+  header: Envelope
+  records: StoredItemRecord[]
+  kdf: KdfParams
+  now?: number
+  createdAt?: number
+}): Promise<void> {
+  const db = await getDB()
+  const now = input.now ?? Date.now()
+  const tx = db.transaction([VAULT_STORE, ITEM_STORE, META_STORE], 'readwrite')
   await tx.objectStore(VAULT_STORE).put({
     key: VAULT_KEY,
-    envelope,
+    envelope: input.header,
     updatedAt: now,
   } satisfies VaultRecord)
-  await tx.objectStore(META_STORE).put(now, META_KEYS.lastLocalWriteAt)
+  const items = tx.objectStore(ITEM_STORE)
+  await items.clear()
+  await Promise.all([
+    ...input.records.map((record) => items.put(record)),
+    tx.objectStore(META_STORE).put(input.kdf, META_KEYS.masterKdf),
+    tx.objectStore(META_STORE).put(now, META_KEYS.lastLocalWriteAt),
+    tx.objectStore(META_STORE).put(true, META_KEYS.initialized),
+    ...(input.createdAt === undefined
+      ? []
+      : [tx.objectStore(META_STORE).put(input.createdAt, META_KEYS.createdAt)]),
+  ])
   await tx.done
 }
 

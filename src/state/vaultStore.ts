@@ -6,10 +6,9 @@
  * whoever can read this store can read the vault, so it lives in memory only
  * and never touches storage.
  *
- * Every mutation goes through `persist`, which re-encrypts the whole payload.
- * That is deliberate. Encrypting the vault as one AES-GCM blob means there is
- * no per-item ciphertext to leak through index or timing side channels, and
- * the write cost is negligible at the scale of a personal vault.
+ * Items are persisted as separate authenticated ciphertexts. The encrypted
+ * header holds templates and settings, so editing one item does not re-encrypt
+ * unrelated item data.
  */
 import { create } from 'zustand'
 import type { KdfParams } from '@/crypto/envelope'
@@ -36,8 +35,9 @@ import {
 import {
   WrongPasswordError,
   createVault,
+  getHeaderSignature,
   getVaultState,
-  savePayload,
+  savePayloadChanges,
   unlock,
 } from '@/storage/vaultService'
 import { DEFAULT_AZURE_SYNC_CONFIG, type AzureSyncConfig } from '@/sync/types'
@@ -117,6 +117,9 @@ let masterKey: CryptoKey | null = null
 let masterKdf: KdfParams | null = null
 /** Monotonic guard so a slow persist cannot overwrite a newer one. */
 let writeSequence = 0
+let persistQueue: Promise<void> = Promise.resolve()
+let persistedItems = new Map<string, VaultItem>()
+let persistedHeaderSignature = ''
 
 function hasSession(): boolean {
   return masterKey !== null && masterKdf !== null
@@ -128,6 +131,13 @@ function clearSession(): void {
   masterKdf = null
   clearSyncSessionKey()
   cancelPendingClear()
+  persistedItems = new Map()
+  persistedHeaderSignature = ''
+}
+
+function rememberPersistedPayload(payload: VaultPayload): void {
+  persistedItems = new Map(payload.items.map((item) => [item.id, item]))
+  persistedHeaderSignature = getHeaderSignature(payload)
 }
 
 function toPayload(state: VaultStore): VaultPayload {
@@ -144,10 +154,9 @@ function toPayload(state: VaultStore): VaultPayload {
 
 export const useVaultStore = create<VaultStore>()((set, get) => {
   /**
-   * Encrypts the current state and writes it to IndexedDB.
+   * Writes changed encrypted item records and a changed encrypted header.
    *
-   * Guarded on a live session: after a lock, a late-resolving promise must
-   * not resurrect the key material.
+   * Writes are serialized so an older encryption cannot replace a newer edit.
    */
   async function persist(): Promise<void> {
     if (!hasSession()) return
@@ -155,9 +164,28 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
     const sequence = ++writeSequence
     set({ saving: true })
 
-    try {
+    const operation = persistQueue.then(async () => {
+      if (!hasSession()) return
       const payload = toPayload(get())
-      await savePayload(payload, masterKey!, masterKdf!)
+      const currentIds = new Set(payload.items.map((item) => item.id))
+      const changedItems = payload.items.filter((item) => persistedItems.get(item.id) !== item)
+      const deletedIds = [...persistedItems.keys()].filter((id) => !currentIds.has(id))
+      const headerChanged = getHeaderSignature(payload) !== persistedHeaderSignature
+
+      await savePayloadChanges(
+        payload,
+        masterKey!,
+        masterKdf!,
+        changedItems,
+        deletedIds,
+        headerChanged,
+      )
+      rememberPersistedPayload(payload)
+    })
+    persistQueue = operation.catch(() => undefined)
+
+    try {
+      await operation
       // A newer write landed while this one was in flight; drop this result.
       if (sequence === writeSequence) {
         set({ saving: false, lastSavedAt: Date.now() })
@@ -241,6 +269,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
         masterKey = result.key
         masterKdf = result.kdf
         adoptPayload(result.payload)
+        rememberPersistedPayload(result.payload)
         set({ busy: false })
         return true
       } catch (cause) {
@@ -256,6 +285,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
         masterKey = result.key
         masterKdf = result.kdf
         adoptPayload(result.payload)
+        rememberPersistedPayload(result.payload)
         set({ busy: false })
         return true
       } catch (cause) {
@@ -271,6 +301,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
       set({
         screen: 'unlock',
         items: [],
+        deletedItems: [],
         sync: { config: { ...DEFAULT_AZURE_SYNC_CONFIG } },
         error: null,
         saving: false,

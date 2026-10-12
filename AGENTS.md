@@ -93,12 +93,48 @@ The `@/*` alias maps to `src/*` and is configured in both `vite.config.ts` and
 - UI text is written for the user and explains consequences — especially
   destructive and irreversible actions.
 
+## IndexedDB schema
+
+The fresh local database is `sandiman`, IndexedDB version 1, with three object
+stores. Do not add backward-compatibility payload migrations or a local-format
+discriminator unless the product explicitly starts supporting an earlier
+released format. IndexedDB versions cannot be downgraded, so changing the open
+version requires a fresh database or a deliberate upgrade path.
+
+- **`vault`** uses `key` as its key path and contains one record:
+  `{ key: 'primary', envelope: { v, kdf, iv, data }, updatedAt }`. The envelope
+  encrypts the local header with AES-GCM under the master key. The header holds
+  templates, settings (including the local Azure SAS configuration), payload
+  version/timestamp, and `localItemCount`; its `items` array is empty. The count
+  is encrypted so unlock can detect missing item rows. Envelope version, KDF
+  descriptor, and IV are visible metadata, not secrets.
+- **`items`** uses `id` as its key path and stores one record per item:
+  `{ id, ciphertext: { v, iv, data } }`. The ciphertext contains the complete
+  item, including its ID and tombstone state. Bind AES-GCM additional data to
+  the item ID so a ciphertext cannot be moved to another record. IDs and
+  ciphertext sizes are visible; item contents and other item metadata remain
+  encrypted.
+  Edits rewrite only that item. Add/remove-record operations update item rows
+  and the encrypted header count in one IndexedDB transaction. A user delete is
+  a soft-delete tombstone, so it remains stored until sync merge removes it.
+- **`meta`** is a key/value store for bookkeeping only: `initialized`,
+  `master-kdf` (non-secret KDF descriptor), `created-at`, and
+  `last-local-write`. Never put passwords, keys, SAS secrets, or item data here.
+
+Prepare ciphertext before opening a transaction, then atomically commit related
+header/item/meta writes. Unlock decrypts and validates the header and every item
+before exposing them to the UI. Changing the master password re-encrypts the
+header and all items. This local layout is distinct from Azure sync, which still
+uses one encrypted shareable payload and excludes the local SAS configuration.
+The IndexedDB version number, AES envelope version, and payload version are
+separate concepts; keep the initial IndexedDB version at 1 for this schema.
+
 ## Features
 
 - **Local encrypted vault:** Create/unlock a vault with a master password.
   PBKDF2-HMAC-SHA256 runs in a Web Worker and derives a non-extractable key;
-  AES-GCM encrypts the vault before it is written to IndexedDB. There is no
-  backend, account, or password recovery service.
+  AES-GCM encrypts a local header and each item separately before IndexedDB
+  writes. There is no backend, account, or password recovery service.
 - **Items and templates:** Built-in and user-managed templates support typed
   fields, custom fields, tags, notes, and soft deletion/restoration. Items can be
   searched locally and have their fields reordered. Template edits preserve

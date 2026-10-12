@@ -57,3 +57,10 @@ export interface Envelope {
   /** Base64 AES-GCM-256 ciphertext, including the appended auth tag. */
   data: string
 }
+
+/** Ciphertext for one local record. The record ID is authenticated as AAD. */
+export interface RecordCiphertext {
+  v: number
+  iv: string
+  data: string
+}

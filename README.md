@@ -10,6 +10,7 @@ Vite · React 19 · TypeScript · Tailwind v4 · shadcn/ui · Zustand · Zod
 ## Contents
 
 - [What "zero knowledge" means here](#what-zero-knowledge-means-here)
+- [IndexedDB layout](#indexeddb-layout)
 - [Getting started](#getting-started)
 - [Deploying to Azure Static Web Apps](#deploying-to-azure-static-web-apps)
 - [Project structure](#project-structure)
@@ -30,15 +31,88 @@ Vite · React 19 · TypeScript · Tailwind v4 · shadcn/ui · Zustand · Zod
 
 The master password never leaves the browser. It is stretched with
 PBKDF2-HMAC-SHA256 (600,000 iterations) into a non-extractable AES-GCM-256 key,
-and the vault is encrypted under that key before anything touches disk. Storage
-holds a versioned envelope containing only:
+and vault data is encrypted under that key before anything touches disk. Local
+IndexedDB stores an encrypted header and one authenticated ciphertext per item;
+Azure sync still uses a single encrypted payload envelope. The local header and
+sync envelope contain only:
 
 - the KDF descriptor (algorithm, iteration count, salt) — not secret
+- the envelope version — format metadata, not secret
 - the 12-byte IV — not secret
 - the ciphertext — the only protected part
 
 Losing the master password means losing the vault. There is no recovery key and
 no reset path, by design.
+
+## IndexedDB layout
+
+The local database is named `sandiman` (initial IndexedDB version 1) and has
+three object stores. Secret-bearing content is encrypted before it is written;
+the database does not store item titles, values, tags, or notes as plaintext.
+
+### `vault` — encrypted header
+
+One record, keyed by `key: "primary"`:
+
+```ts
+{
+  key: 'primary',
+  envelope: { v, kdf: { name, iterations, salt }, iv, data },
+  updatedAt, // write timestamp
+}
+```
+
+`envelope.data` is AES-GCM ciphertext for the small local header JSON. That
+header contains the payload version, templates, settings (including local Azure
+sync configuration), the timestamp, and `localItemCount`. Its `items` array is
+empty: item contents live in the `items` store below. `localItemCount` is
+encrypted and lets unlock detect missing item records. The envelope's KDF
+descriptor and IV are visible, but are not secret.
+
+### `items` — one encrypted record per item
+
+The object store uses `id` as its key path. Each record has this shape:
+
+```ts
+{
+  id: 'random-item-id',
+  ciphertext: { v, iv, data },
+}
+```
+
+`ciphertext.data` contains the serialized complete item (including its ID,
+title, values, custom fields, tags, notes, and deletion state), encrypted with
+AES-GCM under the master key. The random item ID is also authenticated as
+additional data, binding ciphertext to its store key and preventing records
+from being swapped. The ID and approximate ciphertext size remain visible to
+someone inspecting IndexedDB; the item's other fields do not. Ordinary item
+edits rewrite only that item's ciphertext. Adding or physically removing a
+record also updates the encrypted header's item count in the same IndexedDB
+transaction. A user delete is a soft-delete tombstone kept for sync, so it
+rewrites that item's ciphertext without reducing the record count.
+
+### `meta` — unencrypted bookkeeping
+
+This key/value store contains:
+
+| Key | Value | Purpose |
+| --- | --- | --- |
+| `initialized` | boolean | Distinguishes a new database from a created vault |
+| `master-kdf` | KDF name, iteration count, and salt | Non-secret KDF bookkeeping; also present in the header envelope |
+| `created-at` | epoch milliseconds | Vault creation time |
+| `last-local-write` | epoch milliseconds | Last successful local write |
+
+The KDF values and timestamps do not reveal the vault contents. The master
+password and raw encryption key are never stored.
+
+Local edits update the affected encrypted records and bookkeeping atomically.
+Unlock decrypts the header and all item records into memory. Changing the master
+password re-encrypts all of them under the new key. This is the initial storage
+layout; no migration from an earlier single-envelope layout is provided.
+
+This local layout is separate from Azure sync: sync still uploads one
+master-key-encrypted payload containing the shareable items, templates, and
+settings, without the local header markers or Azure credentials.
 
 ## Getting started
 
@@ -153,15 +227,13 @@ single field rather than routing URLs.
 | Vault | Unlocked |
 
 **Creating** (`Onboarding` → `createVault`) generates a 16-byte salt, derives a
-key, seeds the built-in templates, and writes the first envelope. The vault
+key, seeds the built-in templates, and writes an encrypted header. The vault
 starts with zero items.
 
-**Unlocking** (`Unlock` → `unlock`) reads the stored envelope, derives a key
-from the supplied password and the stored salt, and attempts decryption. A
-failure is reported as a *wrong password* rather than a generic error, because
-an AES-GCM tag mismatch in this context means one specific thing. Genuine
-corruption is distinguished and says so — the user should not be told to retype
-their password when the stored blob is damaged.
+**Unlocking** (`Unlock` → `unlock`) reads the encrypted header, derives a key
+from the supplied password and stored salt, then decrypts and validates every
+item record. A header authentication failure is reported as a *wrong password*;
+a damaged or missing item record is reported as corruption.
 
 **Locking** clears the key material from module scope and empties the decrypted
 state. Not just hiding it: leaving items rendered after a lock would defeat the
@@ -350,11 +422,13 @@ non-extractable `CryptoKey`, which structured clone carries by reference — raw
 key material never crosses the boundary and cannot be read back even from the
 returned handle.
 
-**The whole vault is one ciphertext.** Encrypting per item would leak structure
-through index and timing side channels: an attacker could see which records
-existed and how large they were. Write cost is negligible for a personal vault,
-so every mutation re-encrypts the lot and there is no per-item ciphertext to
-leak.
+**Local item records are encrypted independently.** This keeps ordinary saves
+proportional to the changed item rather than the full vault. The tradeoff is
+that someone inspecting IndexedDB can observe the number and approximate sizes
+of encrypted records, and notice which record changes. Random item IDs are the
+only item fields used as storage keys; content and labels stay encrypted.
+Azure sync remains a single encrypted payload and does not use this local
+record layout.
 
 **Tombstones are retained across saves.** This one is subtle and was a real bug.
 The store keeps deleted items in `deletedItems` separately from the visible
@@ -364,7 +438,8 @@ them and sync would read the absent record as "never deleted" — silently
 undoing every delete on every other device.
 
 **A fresh IV per encryption.** Reusing an IV under the same key would be
-catastrophic for GCM. `encryptVault` draws one per call.
+catastrophic for GCM. Both `encryptVault` and `encryptRecord` draw a fresh
+random 96-bit IV per call.
 
 **Dates are free text, not `type="date"`.** Stored dates are frequently partial
 or non-ISO, and a native date input cannot represent that without silently

@@ -3,22 +3,22 @@
  *
  * This module owns the one invariant that matters most: the derived master key
  * lives only as a local variable or in the store's memory, and is never
- * written to storage. Everything persisted is the envelope produced by
- * `encryptVault`.
+ * written to storage. Local item records and their header are encrypted
+ * independently; Azure sync continues to use one encrypted payload envelope.
  */
-import { DecryptError, decryptVault, encryptVault } from '@/crypto/aes'
+import { DecryptError, decryptRecord, decryptVault, encryptRecord, encryptVault } from '@/crypto/aes'
 import { createKdfParams, deriveKey } from '@/crypto/kdf'
 import type { Envelope, KdfParams } from '@/crypto/envelope'
 import { createBuiltinTemplates } from './builtins'
 import {
-  META_KEYS,
   isInitialized,
   readEnvelope,
-  setMeta,
-  setMetaEntries,
-  writeEnvelope,
+  readItemRecords,
+  replaceLocalVault,
+  writeLocalChanges,
+  type StoredItemRecord,
 } from './db'
-import { parseVaultPayload } from './schema'
+import { itemSchema, parseVaultPayload } from './schema'
 import {
   DEFAULT_SETTINGS,
   VAULT_PAYLOAD_VERSION,
@@ -71,9 +71,64 @@ export function emptyPayload(now: number = Date.now()): VaultPayload {
   }
 }
 
+function localHeader(payload: VaultPayload): VaultPayload {
+  return {
+    ...payload,
+    items: [],
+    localItemCount: payload.items.length,
+  }
+}
+
+export function getHeaderSignature(payload: VaultPayload): string {
+  return JSON.stringify({
+    version: payload.version,
+    templates: payload.templates,
+    settings: payload.settings,
+    sync: payload.sync,
+    itemCount: payload.items.length,
+  })
+}
+
+async function encryptItems(items: VaultPayload['items'], key: CryptoKey): Promise<StoredItemRecord[]> {
+  return Promise.all(items.map(async (item) => ({
+    id: item.id,
+    ciphertext: await encryptRecord(item, key, `item:${item.id}`),
+  })))
+}
+
+async function decodeVault(envelope: Envelope, key: CryptoKey): Promise<VaultPayload> {
+  const decoded = parseVaultPayload(await decryptVault(envelope, key))
+  const records = await readItemRecords()
+  if (decoded.localItemCount !== records.length) {
+    throw new DecryptError('corrupt-payload', 'The local item records are incomplete')
+  }
+  const items = await Promise.all(records.map(async (record) => {
+    try {
+      const item = itemSchema.parse(
+        await decryptRecord<unknown>(record.ciphertext, key, `item:${record.id}`),
+      )
+      if (item.id !== record.id) {
+        throw new DecryptError('corrupt-payload', 'Item ID does not match its encrypted record')
+      }
+      return item
+    } catch (cause) {
+      if (cause instanceof DecryptError) throw cause
+      throw new DecryptError('corrupt-payload', 'A local item does not match the vault schema')
+    }
+  }))
+  return { ...decoded, items }
+}
+
+async function installVault(payload: VaultPayload, key: CryptoKey, kdf: KdfParams, now: number) {
+  const header = await encryptVault(localHeader(payload), key, kdf)
+  const records = await encryptItems(payload.items, key)
+  await replaceLocalVault({ header, records, kdf, now })
+  return header
+}
+
 /**
  * Creates the vault: derives a fresh key, seeds built-in templates, and
- * writes the first envelope.
+ * writes an encrypted header and encrypted item records.
  */
 export async function createVault(
   password: string,
@@ -87,13 +142,8 @@ export async function createVault(
   const { key, elapsedMs } = await deriveKey(password, kdf)
   const payload = emptyPayload(now)
 
-  await writeEnvelope(await encryptVault(payload, key, kdf), now)
-  await setMetaEntries({
-    [META_KEYS.initialized]: true,
-    [META_KEYS.masterKdf]: kdf,
-    [META_KEYS.createdAt]: now,
-    [META_KEYS.lastLocalWriteAt]: now,
-  })
+  const header = await encryptVault(localHeader(payload), key, kdf)
+  await replaceLocalVault({ header, records: [], kdf, now, createdAt: now })
 
   return { payload, key, kdf, elapsedMs }
 }
@@ -146,8 +196,7 @@ export async function unlock(password: string): Promise<UnlockSuccess> {
 
   let payload: VaultPayload
   try {
-    const decrypted = await decryptVault(envelope, key)
-    payload = parseVaultPayload(decrypted)
+    payload = await decodeVault(envelope, key)
   } catch (cause) {
     if (cause instanceof DecryptError && cause.reason === 'wrong-password') {
       throw new WrongPasswordError()
@@ -170,9 +219,22 @@ export async function savePayload(
   kdf: KdfParams,
   now: number = Date.now(),
 ): Promise<Envelope> {
-  const envelope = await encryptVault(payload, key, kdf)
-  await writeEnvelope(envelope, now)
-  return envelope
+  return installVault(payload, key, kdf, now)
+}
+
+/** Encrypts only changed items; the small encrypted header is replaced only when its content changes. */
+export async function savePayloadChanges(
+  payload: VaultPayload,
+  key: CryptoKey,
+  kdf: KdfParams,
+  changedItems: VaultPayload['items'],
+  deletedItemIds: string[],
+  headerChanged: boolean,
+  now: number = Date.now(),
+): Promise<void> {
+  const header = headerChanged ? await encryptVault(localHeader(payload), key, kdf) : undefined
+  const upserts = await encryptItems(changedItems, key)
+  await writeLocalChanges({ header, upserts, deletes: deletedItemIds, kdf, now })
 }
 
 /**
@@ -190,8 +252,9 @@ export async function changeMasterPassword(
   if (!envelope) throw new Error('No vault exists on this device yet')
 
   const { key: currentKey } = await deriveKey(currentPassword, envelope.kdf)
+  let payload: VaultPayload
   try {
-    await decryptVault(envelope, currentKey)
+    payload = await decodeVault(envelope, currentKey)
   } catch (cause) {
     if (cause instanceof DecryptError && cause.reason === 'wrong-password') {
       throw new WrongPasswordError()
@@ -203,12 +266,8 @@ export async function changeMasterPassword(
   const { key, elapsedMs } = await deriveKey(newPassword, kdf)
   const now = Date.now()
 
-  // Carry the decrypted payload across under the new key.
-  const decrypted = await decryptVault(envelope, currentKey)
-  const payload = parseVaultPayload(decrypted)
-
-  await writeEnvelope(await encryptVault(payload, key, kdf), now)
-  await setMeta(META_KEYS.masterKdf, kdf)
+  // All records must be re-encrypted because the new password derives a new key.
+  await installVault(payload, key, kdf, now)
 
   return { payload, key, kdf, elapsedMs }
 }
