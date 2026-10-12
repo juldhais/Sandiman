@@ -94,6 +94,8 @@ export interface VaultItem extends Syncable {
   customFields: CustomField[]
   /** Per-item display order; omitted ids follow their natural template order. */
   fieldOrder?: string[]
+  /** Template fields explicitly removed from this item. */
+  hiddenFieldIds?: string[]
   tags: string[]
   notes: string
 }

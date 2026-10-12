@@ -58,6 +58,20 @@ describe('vault storage lifecycle', () => {
     await expect(getVaultState()).resolves.toBe('uninitialized')
   })
 
+  it('includes optional GitHub sync settings in a new vault payload', () => {
+    const config = {
+      owner: 'example',
+      repo: 'private-vault',
+      branch: '',
+      path: 'vault-encrypted.json',
+      token: 'github_pat_example',
+      autoSync: false,
+      autoSyncMinutes: 15,
+    }
+
+    expect(emptyPayload(1000, config).sync?.config).toEqual(config)
+  })
+
   it('reports locked once an envelope exists', async () => {
     await seed('master-password', emptyPayload(1000))
     await expect(getVaultState()).resolves.toBe('locked')

@@ -77,7 +77,11 @@ export interface VaultStore {
 
   // Actions
   initialize: () => Promise<void>
-  createNewVault: (password: string, confirm: string) => Promise<boolean>
+  createNewVault: (
+    password: string,
+    confirm: string,
+    syncConfig?: GitHubSyncConfig,
+  ) => Promise<boolean>
   unlockVault: (password: string) => Promise<boolean>
   lock: () => void
   addItem: (item: VaultItem) => Promise<void>
@@ -254,7 +258,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
       }
     },
 
-    async createNewVault(password, confirm) {
+    async createNewVault(password, confirm, syncConfig) {
       if (password.length < 8) {
         set({ error: 'Use a master password of at least 8 characters' })
         return false
@@ -266,7 +270,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
 
       set({ busy: true, error: null })
       try {
-        const result = await createVault(password)
+        const result = await createVault(password, Date.now(), syncConfig)
         masterKey = result.key
         masterKdf = result.kdf
         adoptPayload(result.payload)
@@ -363,6 +367,12 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
             templateId: template?.id ?? null,
             title: title.trim(),
             values,
+            hiddenFieldIds: [
+              ...new Set([
+                ...(item.hiddenFieldIds ?? []),
+                ...removedFieldIds.filter((id) => template?.fields.some((field) => field.id === id)),
+              ]),
+            ],
             customFields: customFields
               .filter((custom) => !removedIds.has(custom.id))
               .map((custom) => ({

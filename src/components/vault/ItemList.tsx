@@ -24,10 +24,15 @@ import { EmptyState } from '@/components/vault/EmptyState'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { TemplateIcon } from '@/components/TemplateIcon'
 
-/** Short secondary line: the first non-empty field value. */
+/** Short secondary line: the first non-empty, non-sensitive field value. */
 function subtitleFor(item: VaultItem, template: VaultTemplate | null): string {
   const fields = resolveFields(item, template).filter(
-    (field) => field.value.trim() && field.def.type !== 'note',
+    (field) =>
+      field.value.trim() &&
+      field.def.type !== 'note' &&
+      field.def.type !== 'masked' &&
+      field.def.id.toLowerCase() !== 'password' &&
+      field.def.label.toLowerCase() !== 'password',
   )
   const preferred =
     fields.find((field) => field.id === 'username') ??
@@ -161,7 +166,7 @@ export function ItemList({
                         ) : null}
                       </span>
                       <span className="text-muted-foreground block truncate text-xs">
-                        {subtitleFor(item, template) || 'No values yet'}
+                        {subtitleFor(item, template)}
                       </span>
                     </span>
                   </button>

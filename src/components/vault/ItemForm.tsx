@@ -109,6 +109,11 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
     () => ({
       ...baseItem,
       templateId: activeTemplate?.id ?? null,
+      // Per-item field removals apply only to the template they were made for.
+      hiddenFieldIds:
+        baseItem.templateId === (activeTemplate?.id ?? null)
+          ? baseItem.hiddenFieldIds
+          : [],
       customFields: draftFields,
       fieldOrder,
     }),

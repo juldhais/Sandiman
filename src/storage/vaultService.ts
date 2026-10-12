@@ -24,7 +24,7 @@ import {
   VAULT_PAYLOAD_VERSION,
   type VaultPayload,
 } from './types'
-import { DEFAULT_GITHUB_SYNC_CONFIG } from '@/sync/types'
+import { DEFAULT_GITHUB_SYNC_CONFIG, type GitHubSyncConfig } from '@/sync/types'
 
 export type VaultState = 'uninitialized' | 'locked' | 'unlocked'
 
@@ -58,7 +58,10 @@ export async function getVaultState(): Promise<VaultState> {
 }
 
 /** Builds the payload a brand-new vault starts with. */
-export function emptyPayload(now: number = Date.now()): VaultPayload {
+export function emptyPayload(
+  now: number = Date.now(),
+  syncConfig: GitHubSyncConfig = DEFAULT_GITHUB_SYNC_CONFIG,
+): VaultPayload {
   return {
     version: VAULT_PAYLOAD_VERSION,
     items: [],
@@ -66,7 +69,7 @@ export function emptyPayload(now: number = Date.now()): VaultPayload {
     settings: { ...DEFAULT_SETTINGS },
     updatedAt: now,
     sync: {
-      config: { ...DEFAULT_GITHUB_SYNC_CONFIG },
+      config: { ...syncConfig },
     },
   }
 }
@@ -133,6 +136,7 @@ async function installVault(payload: VaultPayload, key: CryptoKey, kdf: KdfParam
 export async function createVault(
   password: string,
   now: number = Date.now(),
+  syncConfig: GitHubSyncConfig = DEFAULT_GITHUB_SYNC_CONFIG,
 ): Promise<UnlockSuccess> {
   if (await isInitialized()) {
     throw new Error('A vault already exists on this device')
@@ -140,7 +144,7 @@ export async function createVault(
 
   const kdf = createKdfParams()
   const { key, elapsedMs } = await deriveKey(password, kdf)
-  const payload = emptyPayload(now)
+  const payload = emptyPayload(now, syncConfig)
 
   const header = await encryptVault(localHeader(payload), key, kdf)
   await replaceLocalVault({ header, records: [], kdf, now, createdAt: now })

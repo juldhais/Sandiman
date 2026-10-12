@@ -63,6 +63,9 @@ export function SettingsPanel({
   const [changeError, setChangeError] = useState<string | null>(null)
 
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deletePassword, setDeletePassword] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [csvItems, setCsvItems] = useState<VaultItem[]>([])
   const [csvFileName, setCsvFileName] = useState('')
   const [csvError, setCsvError] = useState<string | null>(null)
@@ -76,6 +79,8 @@ export function SettingsPanel({
       setConfirm('')
       setChangeError(null)
       setConfirmDelete(false)
+      setDeletePassword('')
+      setDeleteError(null)
       setCsvItems([])
       setCsvFileName('')
       setCsvError(null)
@@ -122,16 +127,26 @@ export function SettingsPanel({
   }
 
   async function handleDeleteVault(): Promise<void> {
+    if (!deletePassword || deleting) return
+    setDeleting(true)
+    setDeleteError(null)
     try {
+      if (!(await verifyMasterPassword(deletePassword))) {
+        throw new WrongPasswordError()
+      }
       await destroyDatabase()
       toast.success('Vault deleted from this device')
       // A full reload is the cleanest reset: it drops the in-memory key and
       // every derived view at once.
       window.location.reload()
-    } catch {
-      toast.error('Could not delete the vault', {
-        description: 'Another tab may still be open. Close it and try again.',
-      })
+    } catch (cause) {
+      setDeleteError(
+        cause instanceof WrongPasswordError
+          ? 'The master password is incorrect.'
+          : 'Could not delete the vault. Another tab may still be open; close it and try again.',
+      )
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -484,15 +499,45 @@ export function SettingsPanel({
                     Deleting removes the encrypted vault from this browser. If it has
                     been synced to GitHub, encrypted copies may remain in its commit history.
                   </p>
+                  <div className="space-y-2">
+                    <Label htmlFor="delete-vault-password">Master password</Label>
+                    <PasswordInput
+                      id="delete-vault-password"
+                      value={deletePassword}
+                      onChange={(event) => {
+                        setDeletePassword(event.target.value)
+                        setDeleteError(null)
+                      }}
+                      autoComplete="current-password"
+                      aria-invalid={deleteError !== null}
+                      disabled={deleting}
+                    />
+                    {deleteError ? (
+                      <p className="text-destructive text-xs" role="alert">
+                        {deleteError}
+                      </p>
+                    ) : null}
+                  </div>
                   <div className="flex gap-2">
                     <Button
                       size="sm"
                       variant="destructive"
                       onClick={() => void handleDeleteVault()}
+                      disabled={!deletePassword || deleting}
+                      loading={deleting}
                     >
-                      Delete anyway
+                      {deleting ? 'Deleting…' : 'Delete anyway'}
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => setConfirmDelete(false)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={deleting}
+                      onClick={() => {
+                        setConfirmDelete(false)
+                        setDeletePassword('')
+                        setDeleteError(null)
+                      }}
+                    >
                       Cancel
                     </Button>
                   </div>

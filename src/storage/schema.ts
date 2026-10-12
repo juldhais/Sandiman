@@ -61,6 +61,7 @@ export const itemSchema = z.object({
   values: z.record(z.string(), z.string()).catch({}),
   customFields: z.array(customFieldSchema).catch([]),
   fieldOrder: z.array(z.string()).catch([]).optional(),
+  hiddenFieldIds: z.array(z.string()).catch([]).optional(),
   tags: z.array(z.string()).catch([]),
   notes: z.string().catch(''),
   createdAt: epochMs(0),

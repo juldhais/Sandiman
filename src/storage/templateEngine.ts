@@ -48,10 +48,12 @@ export function resolveFields(item: VaultItem, template: VaultTemplate | null): 
   const resolved: ResolvedField[] = []
   const declaredIds = new Set<string>()
   const customIds = new Set(item.customFields.map((field) => field.id))
+  const hiddenIds = new Set(item.hiddenFieldIds ?? [])
 
   if (template) {
     for (const def of template.fields) {
       declaredIds.add(def.id)
+      if (hiddenIds.has(def.id)) continue
       resolved.push({
         id: def.id,
         def,

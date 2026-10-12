@@ -60,6 +60,18 @@ describe('resolveFields', () => {
     ])
   })
 
+  it('does not restore a template field explicitly removed from an item', () => {
+    const item: VaultItem = {
+      ...loginItem({ username: 'alice' }),
+      hiddenFieldIds: ['password'],
+    }
+
+    const visible = resolveFields(item, loginTemplate)
+
+    expect(visible.map((field) => field.id)).not.toContain('password')
+    expect(visible.map((field) => field.id)).toContain('username')
+  })
+
   it('permanently removes explicitly removed field values and custom fields', () => {
     const item: VaultItem = {
       ...loginItem({ username: 'alice', password: 'secret', url: 'https://example.test' }),

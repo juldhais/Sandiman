@@ -24,9 +24,11 @@ describe('item schema field preferences', () => {
     const item = itemSchema.parse({
       ...baseItem,
       fieldOrder: ['password', 'username'],
+      hiddenFieldIds: ['password'],
     })
 
     expect(item.fieldOrder).toEqual(['password', 'username'])
+    expect(item.hiddenFieldIds).toEqual(['password'])
     expect(item.values.username).toBe('alice')
   })
 
