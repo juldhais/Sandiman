@@ -202,13 +202,15 @@ src/
 │
 ├── components/
 │   ├── ui/                 21 shadcn/ui primitives (Radix-based)
-│   ├── vault/              Item views, NoteWorkspace, folder tree/editor, expiry view
+│   ├── shell/              Sidebar and module navigation
+│   ├── vault/              VaultModule, item views, expiry dashboard
+│   ├── notes/              NotesModule, folder tree/dialog, Markdown editor
 │   ├── templates/          TemplateManager — list and field builder
 │   ├── sync/               SyncPanel
 │   ├── settings/           SettingsPanel
 │   └── FieldControl.tsx    One component per field type
 │
-├── screens/         Onboarding, Unlock, Vault
+├── screens/         Onboarding, Unlock, Workspace
 ├── lib/             cn, clipboard, id helpers
 └── App.tsx          Screen routing (there is no router)
 ```

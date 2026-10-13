@@ -13,12 +13,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { NoteFolderTree, ALL_NOTES_FOLDER_ID } from '@/components/vault/NoteFolderTree'
-import { NoteFolderDialog } from '@/components/vault/NoteFolderDialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ALL_NOTES_FOLDER_ID } from '@/storage/noteFolders'
 
 const MilkdownMarkdownEditor = lazy(() =>
-  import('@/components/vault/MilkdownMarkdownEditor').then((module) => ({
+  import('@/components/notes/MilkdownMarkdownEditor').then((module) => ({
     default: module.MilkdownMarkdownEditor,
   })),
 )
@@ -38,14 +37,18 @@ function folderPath(folder: VaultNoteFolder, folders: readonly VaultNoteFolder[]
   return parts.reverse().join(' / ')
 }
 
-export function NoteWorkspace({
+export function NotesModule({
   selectedId,
   onSelect,
+  folderId,
+  onSelectFolder,
   createRequested,
   onCreateHandled,
 }: {
   selectedId: string | null
   onSelect: (id: string | null) => void
+  folderId: string | null
+  onSelectFolder: (id: string | null) => void
   createRequested: boolean
   onCreateHandled: () => void
 }) {
@@ -54,30 +57,16 @@ export function NoteWorkspace({
   const addNote = useVaultStore((state) => state.addNote)
   const updateNote = useVaultStore((state) => state.updateNote)
   const deleteNote = useVaultStore((state) => state.deleteNote)
-  const addNoteFolder = useVaultStore((state) => state.addNoteFolder)
-  const updateNoteFolder = useVaultStore((state) => state.updateNoteFolder)
-  const deleteNoteFolder = useVaultStore((state) => state.deleteNoteFolder)
   const [query, setQuery] = useState('')
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(ALL_NOTES_FOLDER_ID)
-  const [folderEditor, setFolderEditor] = useState<
-    { kind: 'create'; parentId: string | null } | { kind: 'edit'; folder: VaultNoteFolder } | null
-  >(null)
-  const [pendingDeleteFolder, setPendingDeleteFolder] = useState<VaultNoteFolder | null>(null)
   const [pendingDelete, setPendingDelete] = useState<VaultNote | null>(null)
   const handledCreateRequest = useRef(false)
-  const effectiveFolderId = selectedFolderId === null && !notes.some((note) => !note.folderId)
-    ? ALL_NOTES_FOLDER_ID
-    : selectedFolderId !== null && selectedFolderId !== ALL_NOTES_FOLDER_ID &&
-        !folders.some((folder) => folder.id === selectedFolderId)
-      ? ALL_NOTES_FOLDER_ID
-      : selectedFolderId
 
   const createNote = useCallback(async (): Promise<void> => {
-    const folderId = effectiveFolderId === ALL_NOTES_FOLDER_ID ? null : effectiveFolderId
-    const note = await addNote('Untitled', '', folderId)
+    const targetFolderId = folderId === ALL_NOTES_FOLDER_ID ? null : folderId
+    const note = await addNote('Untitled', '', targetFolderId)
     setQuery('')
     onSelect(note.id)
-  }, [addNote, effectiveFolderId, onSelect])
+  }, [addNote, folderId, onSelect])
 
   useEffect(() => {
     if (!createRequested) {
@@ -93,52 +82,26 @@ export function NoteWorkspace({
   const visible = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase()
     return notes
-      .filter((note) => effectiveFolderId === ALL_NOTES_FOLDER_ID || (note.folderId ?? null) === effectiveFolderId)
+      .filter((note) => folderId === ALL_NOTES_FOLDER_ID || (note.folderId ?? null) === folderId)
       .filter((note) => !needle || note.title.toLocaleLowerCase().includes(needle) || note.markdown.toLocaleLowerCase().includes(needle))
       .sort((left, right) => right.updatedAt - left.updatedAt)
-  }, [notes, query, effectiveFolderId])
+  }, [notes, query, folderId])
   const candidate = notes.find((note) => note.id === selectedId) ?? null
   const selected = candidate && (
-    effectiveFolderId === ALL_NOTES_FOLDER_ID || (candidate.folderId ?? null) === effectiveFolderId
+    folderId === ALL_NOTES_FOLDER_ID || (candidate.folderId ?? null) === folderId
   ) ? candidate : null
-
-  async function saveFolder(name: string, parentId: string | null): Promise<void> {
-    if (folderEditor?.kind === 'edit') {
-      await updateNoteFolder(folderEditor.folder.id, { name, parentId })
-    } else {
-      const folder = await addNoteFolder(name, parentId)
-      setSelectedFolderId(folder.id)
-    }
-    setFolderEditor(null)
-  }
-
-  async function confirmDeleteFolder(): Promise<void> {
-    if (!pendingDeleteFolder) return
-    const parentId = await deleteNoteFolder(pendingDeleteFolder.id)
-    setSelectedFolderId(parentId)
-    setPendingDeleteFolder(null)
-  }
 
   async function moveNoteToFolder(
     id: string,
     changes: Pick<VaultNote, 'title' | 'markdown' | 'folderId'>,
   ): Promise<void> {
-    setSelectedFolderId(ALL_NOTES_FOLDER_ID)
+    onSelectFolder(ALL_NOTES_FOLDER_ID)
     await updateNote(id, changes)
   }
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 md:grid-cols-[22rem_minmax(0,1fr)]">
       <section className={`min-h-0 flex-col border-r ${selected ? 'hidden md:flex' : 'flex'}`}>
-        <NoteFolderTree
-          folders={folders}
-          notes={notes}
-          selectedFolderId={effectiveFolderId}
-          onSelect={setSelectedFolderId}
-          onCreate={(parentId) => setFolderEditor({ kind: 'create', parentId })}
-          onEdit={(folder) => setFolderEditor({ kind: 'edit', folder })}
-          onDelete={setPendingDeleteFolder}
-        />
         <div className="flex items-center gap-2 border-b p-3">
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" aria-label="Search notes" type="search" />
         </div>
@@ -186,31 +149,6 @@ export function NoteWorkspace({
           </div>
         )}
       </section>
-
-      <NoteFolderDialog
-        key={folderEditor?.kind === 'edit' ? `folder-${folderEditor.folder.id}` : folderEditor ? 'new-folder' : 'closed-folder'}
-        folders={folders}
-        folder={folderEditor?.kind === 'edit' ? folderEditor.folder : null}
-        defaultParentId={folderEditor?.kind === 'create' ? folderEditor.parentId : null}
-        open={folderEditor !== null}
-        onOpenChange={(open) => { if (!open) setFolderEditor(null) }}
-        onSave={saveFolder}
-      />
-
-      <Dialog open={pendingDeleteFolder !== null} onOpenChange={(open) => { if (!open) setPendingDeleteFolder(null) }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete this folder?</DialogTitle>
-            <DialogDescription>
-              Notes and subfolders will be moved to this folder’s parent, or to Unfiled if it has no parent. No notes will be deleted.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingDeleteFolder(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={() => void confirmDeleteFolder()}>Delete folder</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={pendingDelete !== null} onOpenChange={(open) => { if (!open) setPendingDelete(null) }}>
         <DialogContent>

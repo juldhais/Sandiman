@@ -281,11 +281,11 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
       <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <DialogHeader className="shrink-0 border-b p-6 pb-4">
           <DialogTitle>{isNew ? 'Add item' : `Edit ${item!.title || 'item'}`}</DialogTitle>
-          <DialogDescription>
-            {isNew
-              ? 'Use Edit Fields to reorder, add, or remove fields. Removed fields are permanently deleted when you save.'
-              : 'Changes are encrypted when saved. Removed fields and their values are permanently deleted from this item.'}
-          </DialogDescription>
+          {isNew ? (
+            <DialogDescription>
+              Use Edit Fields to reorder, add, or remove fields. Removed fields are permanently deleted when you save.
+            </DialogDescription>
+          ) : null}
         </DialogHeader>
 
         <form

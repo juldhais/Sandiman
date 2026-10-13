@@ -1,4 +1,26 @@
-import type { VaultNoteFolder } from './types'
+import type { VaultNote, VaultNoteFolder } from './types'
+
+/** Sentinel for viewing notes across all folders (distinct from Unfiled). */
+export const ALL_NOTES_FOLDER_ID = '__all_notes__'
+
+/** Keep the selected folder valid as folders and notes change. */
+export function resolveSelectedFolderId(
+  selectedFolderId: string | null,
+  folders: readonly VaultNoteFolder[],
+  notes: readonly VaultNote[],
+): string | null {
+  if (selectedFolderId === null && !notes.some((note) => !note.folderId)) {
+    return ALL_NOTES_FOLDER_ID
+  }
+  if (
+    selectedFolderId !== null &&
+    selectedFolderId !== ALL_NOTES_FOLDER_ID &&
+    !folders.some((folder) => folder.id === selectedFolderId)
+  ) {
+    return ALL_NOTES_FOLDER_ID
+  }
+  return selectedFolderId
+}
 
 /** Validates the active folder hierarchy and rejects duplicate sibling names. */
 export function validateFolderTree(folders: readonly VaultNoteFolder[]): void {

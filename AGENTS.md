@@ -39,11 +39,13 @@ src/
   state/                  Zustand vault state, auto-lock, auto-sync, theme
   components/
     ui/                   Shared Radix/shadcn-style primitives
-    vault/                Item list/detail/form, sidebar, expiry dashboard
+    shell/                Workspace sidebar and module navigation
+    vault/                VaultModule, item list/detail/form, expiry dashboard
+    notes/                NotesModule, folder tree/dialog, Markdown editor
     templates/            Template management and field builder
     sync/                 GitHub sync settings and controls
     settings/             Vault and application preferences
-  screens/                Onboarding, Unlock, Vault
+  screens/                Onboarding, Unlock, Workspace
   lib/                    Class names, clipboard, ids
 ```
 

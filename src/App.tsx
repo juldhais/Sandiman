@@ -12,7 +12,7 @@ import { useAutoLock } from '@/state/autoLock'
 import { useAutoSync } from '@/state/autoSync'
 import { Onboarding } from '@/screens/Onboarding'
 import { Unlock } from '@/screens/Unlock'
-import { Vault } from '@/screens/Vault'
+import { Workspace } from '@/screens/Workspace'
 
 export default function App() {
   const ready = useVaultStore((state) => state.ready)
@@ -45,7 +45,7 @@ function Screen() {
     case 'unlock':
       return <Unlock />
     case 'vault':
-      return <Vault />
+      return <Workspace />
     default:
       return <Booting />
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { recoverNoteFolderId, validateFolderPlacement, validateFolderTree } from '@/storage/noteFolders'
-import type { VaultNoteFolder } from '@/storage/types'
+import { ALL_NOTES_FOLDER_ID, recoverNoteFolderId, resolveSelectedFolderId, validateFolderPlacement, validateFolderTree } from '@/storage/noteFolders'
+import type { VaultNote, VaultNoteFolder } from '@/storage/types'
 
 const folder = (
   id: string,
@@ -16,7 +16,27 @@ const folder = (
   ...overrides,
 })
 
+const note = (id: string, folderId: string | null): VaultNote => ({
+  id,
+  title: id,
+  markdown: '',
+  folderId,
+  createdAt: 1,
+  updatedAt: 1,
+  deleted: false,
+})
+
 describe('note folder rules', () => {
+  it('keeps the selected folder valid and distinguishes Unfiled from All notes', () => {
+    const folders = [folder('work', null)]
+    const notes = [note('filed', 'work'), note('loose', null)]
+
+    expect(resolveSelectedFolderId('work', folders, notes)).toBe('work')
+    expect(resolveSelectedFolderId(null, folders, notes)).toBeNull()
+    expect(resolveSelectedFolderId('missing', folders, notes)).toBe(ALL_NOTES_FOLDER_ID)
+    expect(resolveSelectedFolderId(null, folders, [note('filed', 'work')])).toBe(ALL_NOTES_FOLDER_ID)
+  })
+
   it('accepts a valid nested tree and rejects missing parents and cycles', () => {
     expect(() => validateFolderTree([folder('parent', null), folder('child', 'parent')])).not.toThrow()
     expect(() => validateFolderTree([folder('child', 'missing')])).toThrow(/parent/)

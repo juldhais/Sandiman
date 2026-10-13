@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, Folder, FolderPlus, Pencil, Trash2 } from 'lucide-react'
 import type { VaultNote, VaultNoteFolder } from '@/storage/types'
+import { ALL_NOTES_FOLDER_ID } from '@/storage/noteFolders'
 import { Button } from '@/components/ui/button'
 
-export const ALL_NOTES_FOLDER_ID = '__all_notes__'
+export { ALL_NOTES_FOLDER_ID } from '@/storage/noteFolders'
 
 export function NoteFolderTree({
   folders,
@@ -47,7 +48,7 @@ export function NoteFolderTree({
     const isSelected = selectedFolderId === folder.id
     return (
       <div key={folder.id}>
-        <div className={`group flex items-center gap-1 rounded-md pr-1 ${isSelected ? 'bg-accent' : 'hover:bg-accent/50'}`} style={{ paddingLeft: `${8 + depth * 16}px` }}>
+          <div className={`group flex items-center gap-1 rounded-md pr-1 ${isSelected ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent'}`} style={{ paddingLeft: `${8 + depth * 16}px` }}>
           <button
             type="button"
             className="text-muted-foreground flex size-6 shrink-0 items-center justify-center"
@@ -89,35 +90,33 @@ export function NoteFolderTree({
   }
 
   return (
-    <section className="max-h-[35dvh] min-h-36 shrink-0 overflow-y-auto border-b p-3 md:max-h-[45%] md:min-h-40">
-      <div className="mb-2 flex items-center justify-between">
-        <p className="text-muted-foreground px-1 text-xs font-medium uppercase tracking-wide">Folders</p>
+    <div className="space-y-0.5">
+      <div className="flex items-center justify-between">
+        <span className="text-muted-foreground px-2 py-1 text-xs">Folders</span>
         <Button disabled={disabled} size="icon-sm" variant="ghost" aria-label="Create folder" onClick={() => createFolder(null)}>
           <FolderPlus />
         </Button>
       </div>
-      <div className="space-y-0.5">
-        <FolderChoice
-          selected={selectedFolderId === ALL_NOTES_FOLDER_ID}
-          disabled={disabled}
-          label="All notes"
-          count={notes.length}
-          onClick={() => onSelect(ALL_NOTES_FOLDER_ID)}
-        />
-        {(childrenByParent.get(null) ?? []).map((folder) => renderFolder(folder, 0))}
-        {countIn(null) > 0 ? (
-          <div className="mt-1 border-t pt-1">
-            <FolderChoice
-          selected={selectedFolderId === null}
-          disabled={disabled}
-              label="Unfiled"
-              count={countIn(null)}
-              onClick={() => onSelect(null)}
-            />
-          </div>
-        ) : null}
-      </div>
-    </section>
+      <FolderChoice
+        selected={selectedFolderId === ALL_NOTES_FOLDER_ID}
+        disabled={disabled}
+        label="All notes"
+        count={notes.length}
+        onClick={() => onSelect(ALL_NOTES_FOLDER_ID)}
+      />
+      {(childrenByParent.get(null) ?? []).map((folder) => renderFolder(folder, 0))}
+      {countIn(null) > 0 ? (
+        <div className="mt-1 border-t pt-1">
+          <FolderChoice
+            selected={selectedFolderId === null}
+            disabled={disabled}
+            label="Unfiled"
+            count={countIn(null)}
+            onClick={() => onSelect(null)}
+          />
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -140,7 +139,7 @@ function FolderChoice({
       disabled={disabled}
       onClick={onClick}
       aria-current={selected ? 'page' : undefined}
-      className={`flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm ${selected ? 'bg-accent' : 'hover:bg-accent/50'}`}
+      className={`flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm ${selected ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent'}`}
     >
       <span className="size-6 shrink-0" aria-hidden="true" />
       <Folder className="size-4 shrink-0" />
