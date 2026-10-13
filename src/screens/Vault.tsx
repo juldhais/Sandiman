@@ -210,10 +210,15 @@ export function Vault() {
             <Settings />
           </Button>
           <ToggleThemeButton />
-          {view.kind === 'notes' ? null : (
+          {view.kind === 'notes' ? (
+            <Button size="sm" onClick={openCreateNote}>
+              <Plus />
+              <span className="hidden sm:inline">Add note</span>
+            </Button>
+          ) : (
             <Button size="sm" onClick={() => openCreate(null)}>
               <Plus />
-              <span className="hidden sm:inline">Add</span>
+              <span className="hidden sm:inline">Add item</span>
             </Button>
           )}
         </header>

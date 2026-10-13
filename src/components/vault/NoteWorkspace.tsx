@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Folder, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, FileText, Folder, Trash2 } from 'lucide-react'
 import type { VaultNote, VaultNoteFolder } from '@/storage/types'
 import { useVaultStore } from '@/state/vaultStore'
 import { Button } from '@/components/ui/button'
@@ -141,7 +141,6 @@ export function NoteWorkspace({
         />
         <div className="flex items-center gap-2 border-b p-3">
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" aria-label="Search notes" type="search" />
-          <Button size="icon" onClick={() => void createNote()} aria-label="Create note"><Plus /></Button>
         </div>
         {visible.length === 0 ? (
           <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-sm">
