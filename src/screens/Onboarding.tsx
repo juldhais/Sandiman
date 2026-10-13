@@ -12,6 +12,7 @@ import { estimateStrength } from '@/generator/password'
 import { useVaultStore } from '@/state/vaultStore'
 import {
   DEFAULT_GITHUB_SYNC_CONFIG,
+  DEFAULT_VAULT_PATH,
   isSyncConfigured,
   missingSyncFields,
   type GitHubSyncConfig,
@@ -201,16 +202,8 @@ export function Onboarding() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="onboarding-sync-path">Encrypted file path</Label>
-                  <Input
-                    id="onboarding-sync-path"
-                    value={githubConfig.path}
-                    onChange={(event) =>
-                      setGithubConfig((config) => ({ ...config, path: event.target.value }))
-                    }
-                    placeholder="vault-encrypted.json"
-                    autoComplete="off"
-                  />
+                  <Label>Encrypted vault file</Label>
+                  <p className="text-muted-foreground text-sm">{DEFAULT_VAULT_PATH} (fixed filename)</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="onboarding-sync-token">GitHub personal access token</Label>

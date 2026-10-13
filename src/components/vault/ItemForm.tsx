@@ -51,7 +51,6 @@ const TITLE_FIELD: FieldDef = {
   type: 'text',
   required: true,
   copyable: false,
-  expiry: false,
 }
 
 const FIELD_TYPE_LABELS: Record<FieldType, string> = {
@@ -60,6 +59,7 @@ const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   number: 'Number',
   date: 'Date',
   cardExpiry: 'Card expiry (MM/YY)',
+  expiryDate: 'Expiry Date (DD/MM/YYYY)',
   boolean: 'Yes / No',
   url: 'URL',
   note: 'Multi-line note',
@@ -258,7 +258,6 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
       type: 'text',
       required: false,
       copyable: true,
-      expiry: false,
       value: '',
     }
     setDraftFields((current) => [...current, field])

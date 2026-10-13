@@ -127,7 +127,6 @@ export function parseLoginCsv(input: string): VaultItem[] {
         type: 'text',
         required: false,
         copyable: false,
-        expiry: false,
         value,
       })
     }

@@ -4,6 +4,7 @@ import {
   buildFieldSchema,
   collectValues,
   createItem,
+  expiryFields,
   removeItemFields,
   resolveFields,
   suggestTitle,
@@ -35,7 +36,6 @@ function field(overrides: Partial<FieldDef> & { id: string }): FieldDef {
     type: 'text',
     required: false,
     copyable: false,
-    expiry: false,
     ...overrides,
   }
 }
@@ -83,7 +83,6 @@ describe('resolveFields', () => {
           type: 'text',
           required: false,
           copyable: false,
-          expiry: false,
           value: 'remove me',
         },
       ],
@@ -122,7 +121,6 @@ describe('resolveFields', () => {
           type: 'text',
           required: false,
           copyable: true,
-          expiry: false,
           value: 'a hint',
         },
       ],
@@ -165,6 +163,13 @@ describe('buildFieldSchema', () => {
     expect(schema.safeParse({ expiry: '' }).success).toBe(true)
     expect(schema.safeParse({ expiry: '13/28' }).success).toBe(false)
     expect(schema.safeParse({ expiry: '4/28' }).success).toBe(false)
+  })
+
+  it('validates Expiry Date fields in DD/MM/YYYY format', () => {
+    const schema = buildFieldSchema([field({ id: 'expires', type: 'expiryDate' })])
+    expect(schema.safeParse({ expires: '31/12/2028' }).success).toBe(true)
+    expect(schema.safeParse({ expires: '12/31/2028' }).success).toBe(false)
+    expect(schema.safeParse({ expires: '31/02/2028' }).success).toBe(false)
   })
 
   it('produces a zod object that can parse', () => {
@@ -233,6 +238,7 @@ describe('built-in templates', () => {
   it('marks seeds as built-in with stable ids', () => {
     expect(templates.every((t) => t.builtIn)).toBe(true)
     expect(isBuiltinTemplateId('builtin-login')).toBe(true)
+    expect(isBuiltinTemplateId('builtin-note')).toBe(false)
     expect(isBuiltinTemplateId('some-custom-id')).toBe(false)
   })
 
@@ -246,7 +252,7 @@ describe('built-in templates', () => {
   it('exercises every field type across the seed set', () => {
     const used = new Set(templates.flatMap((t) => t.fields.map((f) => f.type)))
     expect([...used].sort()).toEqual(
-      ['boolean', 'cardExpiry', 'date', 'masked', 'note', 'number', 'text', 'url'].sort(),
+      ['boolean', 'cardExpiry', 'date', 'expiryDate', 'masked', 'note', 'number', 'text', 'url'].sort(),
     )
   })
 
@@ -255,6 +261,24 @@ describe('built-in templates', () => {
     const b = createBuiltinTemplates(0)
     a[0]!.fields[0]!.label = 'mutated'
     expect(b[0]!.fields[0]!.label).not.toBe('mutated')
+  })
+
+  it('tracks expiry field types automatically without a toggle', () => {
+    const template: VaultTemplate = {
+      id: 'expiries', name: 'Expiries', icon: 'Calendar', builtIn: false,
+      fields: [
+        field({ id: 'card', type: 'cardExpiry' }),
+        field({ id: 'date', type: 'expiryDate' }),
+        field({ id: 'ordinary', type: 'date' }),
+        field({ id: 'legacy', type: 'date', expiry: true }),
+      ],
+      createdAt: 0, updatedAt: 0, deleted: false,
+    }
+    const item = {
+      ...loginItem({ card: '04/28', date: '31/12/2028', ordinary: '2028-12-31', legacy: '2028-12-31' }),
+      templateId: template.id,
+    }
+    expect(expiryFields(item, template).map((resolved) => resolved.id)).toEqual(['card', 'date', 'legacy'])
   })
 })
 

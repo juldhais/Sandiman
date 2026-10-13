@@ -95,7 +95,7 @@ The `@/*` alias maps to `src/*` and is configured in both `vite.config.ts` and
 
 ## IndexedDB schema
 
-The fresh local database is `sandiman`, IndexedDB version 1, with three object
+The fresh local database is `sandiman`, IndexedDB version 1, with four object
 stores. Do not add backward-compatibility payload migrations or a local-format
 discriminator unless the product explicitly starts supporting an earlier
 released format. IndexedDB versions cannot be downgraded, so changing the open
@@ -104,10 +104,11 @@ version requires a fresh database or a deliberate upgrade path.
 - **`vault`** uses `key` as its key path and contains one record:
   `{ key: 'primary', envelope: { v, kdf, iv, data }, updatedAt }`. The envelope
   encrypts the local header with AES-GCM under the master key. The header holds
-  templates, settings (including the local GitHub PAT configuration), payload
-  version/timestamp, and `localItemCount`; its `items` array is empty. The count
-  is encrypted so unlock can detect missing item rows. Envelope version, KDF
-  descriptor, and IV are visible metadata, not secrets.
+  templates, settings (including the local GitHub PAT configuration), the
+  encrypted note-folder tree, payload version/timestamp, and `localItemCount` /
+  `localNoteCount`; its `items` and `notes` arrays are empty. Counts are encrypted
+  so unlock can detect missing item/note rows. Envelope version, KDF descriptor,
+  and IV are visible metadata, not secrets.
 - **`items`** uses `id` as its key path and stores one record per item:
   `{ id, ciphertext: { v, iv, data } }`. The ciphertext contains the complete
   item, including its ID and tombstone state. Bind AES-GCM additional data to
@@ -117,15 +118,22 @@ version requires a fresh database or a deliberate upgrade path.
   Edits rewrite only that item. Add/remove-record operations update item rows
   and the encrypted header count in one IndexedDB transaction. A user delete is
   a soft-delete tombstone, so it remains stored until sync merge removes it.
+- **`notes`** uses `id` as its key path and stores one authenticated ciphertext
+  per standalone Markdown note. The complete note—including title, body, folder
+  ID, and tombstone state—is encrypted with AES-GCM under the master key and
+  bound to its ID. Folder names and hierarchy live in the encrypted `vault`
+  header; note folder IDs are never used as storage keys.
 - **`meta`** is a key/value store for bookkeeping only: `initialized`,
   `master-kdf` (non-secret KDF descriptor), `created-at`, and
   `last-local-write`. Never put passwords, keys, PATs, or item data here.
 
 Prepare ciphertext before opening a transaction, then atomically commit related
-header/item/meta writes. Unlock decrypts and validates the header and every item
-before exposing them to the UI. Changing the master password re-encrypts the
-header and all items. This local layout is distinct from GitHub sync, which still
-uses one encrypted shareable payload and excludes the local PAT configuration.
+header/item/note/meta writes. Unlock decrypts and validates the header and every
+item and note before exposing them to the UI. Changing the master password
+re-encrypts the header and all item/note records. This local layout is distinct
+from GitHub sync, which stores the main encrypted payload at `vault.json`, one
+encrypted file per note under `notes/`, and a separate encrypted folder manifest
+at `notes/folders.json`; all GitHub files exclude the local PAT configuration.
 The local last-sync timestamp is not part of that payload, so periodic sync does
 not create commits solely for bookkeeping. The IndexedDB version number, AES
 envelope version, and payload version are separate concepts; keep the initial
@@ -141,26 +149,32 @@ IndexedDB version at 1 for this schema.
   fields, custom fields, tags, notes, and soft deletion/restoration. Items can be
   searched locally and have their fields reordered. Template edits preserve
   values for removed fields as orphans rather than discarding them.
+- **Standalone Markdown notes:** Notes have nested folders, are stored as
+  individually encrypted local records, use a Milkdown Markdown editor with
+  autosave, and sync one encrypted file per note.
+  Folder names/hierarchy are encrypted in the local header and a separate GitHub
+  manifest; GitHub paths contain only random IDs, never folder names.
 - **Secret utilities:** Generate passwords with configurable character sets and
   estimate strength. Masked values can be revealed per field and copied with a
   configurable clipboard-clear delay.
-- **Expiry tracking:** Date fields can be marked as expirations; the dashboard
-  parses common date formats, classifies urgency, and supports warning-window
-  filters.
+- **Expiry tracking:** `Card Expiry (MM/YY)` and `Expiry Date (DD/MM/YYYY)` field
+  types are tracked automatically. Ordinary date fields are not expiries; old
+  saved templates with the retired expiry marker remain supported.
 - **Locking and preferences:** Configure idle auto-lock, lock-on-blur, theme,
   clipboard clearing, and expiry warnings.
-- **GitHub sync:** Optional manual or interval sync stores one encrypted vault
-  payload in a user-controlled repository. Octokit authenticates with a
-  fine-grained PAT, stored only inside the locally encrypted vault and excluded
-  from uploads. Updates use the remote file SHA for optimistic concurrency and
-  per-record merge semantics. Recommend private repositories; commit history
-  retains older encrypted copies.
+- **GitHub sync:** Optional manual or interval sync stores the encrypted main
+  payload, per-note files, and an encrypted note-folder manifest in a
+  user-controlled repository. Octokit authenticates with a fine-grained PAT,
+  stored only inside the locally encrypted vault and excluded from uploads.
+  Updates use GitHub SHAs for optimistic concurrency and per-record merge
+  semantics. Recommend private repositories; commit history retains older
+  encrypted copies.
 
 ## Testing
 
 Vitest, tests colocated as `*.test.ts` next to the module. The suite covers
-crypto round-trips, merge semantics, expiry parsing, GitHub config and transport,
-generation, schema validation, and storage lifecycle.
+crypto round-trips, item/note/folder merge semantics, expiry parsing, GitHub
+config and transport, generation, schema validation, and storage lifecycle.
 
 Two constraints when writing tests:
 

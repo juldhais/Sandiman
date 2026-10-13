@@ -22,7 +22,6 @@ function field(
     type,
     required: false,
     copyable: false,
-    expiry: false,
     ...overrides,
   }
 }
@@ -41,7 +40,6 @@ export const CREDIT_CARD_FIELDS: FieldDef[] = [
     placeholder: '4111 1111 1111 1111',
   }),
   field('expiryDate', 'Expiration Date', 'cardExpiry', {
-    expiry: true,
     placeholder: 'MM/YY',
   }),
   field('cvv', 'Security Code', 'masked', { copyable: true }),
@@ -58,7 +56,7 @@ export const ID_CARD_FIELDS: FieldDef[] = [
   field('documentType', 'Document Type', 'text'),
   field('country', 'Country', 'text'),
   field('issueDate', 'Issue Date', 'date'),
-  field('expirationDate', 'Expiration Date', 'date', { expiry: true }),
+  field('expirationDate', 'Expiration Date', 'expiryDate'),
   field('sex', 'Sex', 'text'),
 ]
 
@@ -84,7 +82,7 @@ export const API_KEY_FIELDS: FieldDef[] = [
   field('issuer', 'Issuer', 'text'),
   field('account', 'Account / Subject', 'text'),
   field('scopes', 'Scopes', 'text'),
-  field('expiresAt', 'Expires At', 'date', { expiry: true }),
+  field('expiresAt', 'Expires At', 'expiryDate'),
   field('baseUrl', 'Base URL', 'url'),
 ]
 
@@ -94,7 +92,7 @@ export const SOFTWARE_LICENSE_FIELDS: FieldDef[] = [
   field('edition', 'Edition', 'text'),
   field('vendor', 'Vendor', 'text'),
   field('purchasedAt', 'Purchased On', 'date'),
-  field('renewsAt', 'Renews On', 'date', { expiry: true }),
+  field('renewsAt', 'Renews On', 'expiryDate'),
   field('downloadUrl', 'Download URL', 'url'),
 ]
 
@@ -108,12 +106,16 @@ export const DATABASE_FIELDS: FieldDef[] = [
   field('sslMode', 'SSL Mode', 'text'),
 ]
 
+/** The Note template is a fixed selector/display field plus Markdown content. */
 export interface BuiltinTemplateSeed {
   key: string
   name: string
   icon: string
   fields: FieldDef[]
 }
+
+/** Removed catalog entry retained only to tombstone it from previously saved vaults. */
+export const LEGACY_NOTE_TEMPLATE_ID = 'builtin-note'
 
 /**
  * Ordered as they appear in the sidebar.

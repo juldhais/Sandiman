@@ -34,6 +34,7 @@ export const fieldDefSchema = z.object({
   type: fieldTypeSchema,
   required: z.boolean().catch(false),
   copyable: z.boolean().catch(false),
+  // Preserve old date fields that were marked through the removed expiry toggle.
   expiry: z.boolean().catch(false),
   placeholder: z.string().optional(),
   defaultValue: z.string().optional(),
@@ -69,6 +70,27 @@ export const itemSchema = z.object({
   deleted: z.boolean().catch(false),
 })
 
+export const noteSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1).catch('Untitled'),
+  markdown: z.string().catch(''),
+  folderId: z.string().nullable().catch(null),
+  createdAt: epochMs(0),
+  updatedAt: epochMs(0),
+  deleted: z.boolean().catch(false),
+})
+
+export const noteFolderSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1).catch('Untitled folder'),
+  parentId: z.string().nullable().catch(null),
+  createdAt: epochMs(0),
+  updatedAt: epochMs(0),
+  deleted: z.boolean().catch(false),
+})
+
+export const noteFoldersSchema = z.array(noteFolderSchema)
+
 export const settingsSchema = z
   .object({
     clipboardClearSeconds: z.number().int().min(0).max(600).catch(DEFAULT_SETTINGS.clipboardClearSeconds),
@@ -84,7 +106,9 @@ export const githubSyncConfigSchema = z
     owner: z.string().catch(''),
     repo: z.string().catch(''),
     branch: z.string().catch(''),
-    path: z.string().catch(DEFAULT_GITHUB_SYNC_CONFIG.path),
+    // Older local vaults may contain a user-selected path; canonicalize it so
+    // all clients use the fixed GitHub filename without dropping other config.
+    path: z.string().catch(DEFAULT_GITHUB_SYNC_CONFIG.path).transform(() => DEFAULT_GITHUB_SYNC_CONFIG.path),
     token: z.string().catch(''),
     autoSync: z.boolean().catch(false),
     autoSyncMinutes: z.number().int().min(1).max(1440).catch(DEFAULT_GITHUB_SYNC_CONFIG.autoSyncMinutes),
@@ -98,11 +122,14 @@ export const storedSyncSettingsSchema = z.object({
 export const vaultPayloadSchema = z.object({
   version: z.number().int().catch(VAULT_PAYLOAD_VERSION),
   items: z.array(itemSchema).catch([]),
+  notes: z.array(noteSchema).catch([]),
+  noteFolders: noteFoldersSchema.catch([]),
   templates: z.array(templateSchema).catch([]),
   settings: settingsSchema,
   updatedAt: epochMs(0),
   sync: storedSyncSettingsSchema.optional(),
   localItemCount: z.number().int().min(0).optional(),
+  localNoteCount: z.number().int().min(0).optional(),
 })
 
 export type ParsedVaultPayload = z.infer<typeof vaultPayloadSchema>

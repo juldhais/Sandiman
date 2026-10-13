@@ -12,6 +12,7 @@ import {
   KeyRound,
   LayoutGrid,
   Layers,
+  StickyNote,
   Plus,
   Settings,
   ShieldCheck,
@@ -33,12 +34,14 @@ export type SidebarView =
   | { kind: 'all' }
   | { kind: 'expiring' }
   | { kind: 'tags' }
+  | { kind: 'notes' }
   | { kind: 'template'; id: string }
 
 export interface SidebarProps {
   view: SidebarView
   onViewChange: (view: SidebarView) => void
   onAddItem: () => void
+  onAddNote: () => void
   onOpenTemplates: () => void
   onOpenSettings: () => void
   onLock: () => void
@@ -49,12 +52,14 @@ export function Sidebar({
   view,
   onViewChange,
   onAddItem,
+  onAddNote,
   onOpenTemplates,
   onOpenSettings,
   onLock,
   lastSync,
 }: SidebarProps) {
   const items = useVaultStore((state) => state.items)
+  const notes = useVaultStore((state) => state.notes)
   const templates = useVaultStore((state) => state.templates)
   const settings = useVaultStore((state) => state.settings)
   const saving = useVaultStore((state) => state.saving)
@@ -118,9 +123,9 @@ export function Sidebar({
       </div>
 
       <div className="px-3 pb-2">
-        <Button className="w-full" size="sm" onClick={onAddItem}>
+        <Button className="w-full" size="sm" onClick={view.kind === 'notes' ? onAddNote : onAddItem}>
           <Plus />
-          Add item
+          {view.kind === 'notes' ? 'Add note' : 'Add item'}
         </Button>
       </div>
 
@@ -147,6 +152,13 @@ export function Sidebar({
             count={tags.length}
             active={view.kind === 'tags'}
             onClick={() => onViewChange({ kind: 'tags' })}
+          />
+          <NavItem
+            iconNode={<StickyNote className="size-4" />}
+            label="Note"
+            count={notes.length}
+            active={view.kind === 'notes'}
+            onClick={() => onViewChange({ kind: 'notes' })}
           />
         </NavGroup>
 

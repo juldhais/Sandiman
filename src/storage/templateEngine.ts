@@ -7,6 +7,7 @@
  */
 import { z } from 'zod'
 import { isValidCardExpiry } from './cardExpiry'
+import { isValidExpiryDate } from './dateExpiry'
 import {
   DEFAULT_SETTINGS,
   type FieldDef,
@@ -76,7 +77,6 @@ export function resolveFields(item: VaultItem, template: VaultTemplate | null): 
         type: 'text',
         required: false,
         copyable: true,
-        expiry: false,
       },
       value,
       orphaned: true,
@@ -133,15 +133,21 @@ export function populatedFields(item: VaultItem, template: VaultTemplate | null)
 
 /** Every field on an item that should drive an expiry warning. */
 export function expiryFields(item: VaultItem, template: VaultTemplate | null): ResolvedField[] {
-  return resolveFields(item, template).filter((field) => field.def.expiry && !isBlank(field.value))
+  return resolveFields(item, template).filter((field) =>
+    !isBlank(field.value) && (
+      field.def.type === 'cardExpiry' ||
+      field.def.type === 'expiryDate' ||
+      // Honor pre-type templates without exposing the old toggle in the editor.
+      (field.def.expiry === true && field.def.type === 'date')
+    ),
+  )
 }
 
 /**
  * Builds a zod object schema from field definitions.
  *
- * `required` drives the basic non-blank rule. The card-expiry type also has a
- * strict MM/YY check; ordinary date fields remain free text so partial dates
- * and other user-entered formats can still be stored.
+ * `required` drives the basic non-blank rule. Expiry field types validate their
+ * dedicated formats; ordinary date fields remain free text.
  */
 export function buildFieldSchema(
   fields: readonly FieldDef[],
@@ -155,6 +161,14 @@ export function buildFieldSchema(
           context.addIssue({ code: 'custom', message: `${def.label} is required` })
         } else if (value && !isValidCardExpiry(value)) {
           context.addIssue({ code: 'custom', message: `${def.label} must use MM/YY` })
+        }
+      })
+    } else if (def.type === 'expiryDate') {
+      shape[def.id] = z.string().trim().superRefine((value, context) => {
+        if (!value && def.required) {
+          context.addIssue({ code: 'custom', message: `${def.label} is required` })
+        } else if (value && !isValidExpiryDate(value)) {
+          context.addIssue({ code: 'custom', message: `${def.label} must use DD/MM/YYYY` })
         }
       })
     } else {

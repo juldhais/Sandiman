@@ -28,6 +28,7 @@ import { Sidebar, type SidebarView } from '@/components/vault/Sidebar'
 import { SyncPanel } from '@/components/sync/SyncPanel'
 import { SettingsPanel } from '@/components/settings/SettingsPanel'
 import { TemplateManager } from '@/components/templates/TemplateManager'
+import { NoteWorkspace } from '@/components/vault/NoteWorkspace'
 
 export function Vault() {
   const items = useVaultStore((state) => state.items)
@@ -39,6 +40,8 @@ export function Vault() {
   const [view, setView] = useState<SidebarView>({ kind: 'all' })
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
+  const [noteCreateRequested, setNoteCreateRequested] = useState(false)
   const [tagFilter, setTagFilter] = useState('')
 
   const [formState, setFormState] = useState<
@@ -82,6 +85,8 @@ export function Vault() {
         return view.id === '' ? items.filter((item) => !item.templateId) : items.filter((item) => item.templateId === view.id)
       case 'tags':
         return items
+      case 'notes':
+        return []
       case 'expiring':
         return items.filter((item) => (expiriesByItem.get(item.id)?.length ?? 0) > 0)
       case 'all':
@@ -117,6 +122,11 @@ export function Vault() {
     setMobileNavOpen(false)
   }
 
+  function openCreateNote(): void {
+    setView({ kind: 'notes' })
+    setNoteCreateRequested(true)
+  }
+
   function openEdit(item: VaultItem): void {
     setFormState({ open: true, item, templateId: item.templateId })
   }
@@ -131,8 +141,12 @@ export function Vault() {
       <div className="hidden w-64 shrink-0 md:block">
         <Sidebar
           view={view}
-          onViewChange={setView}
+          onViewChange={(next) => {
+            setView(next)
+            if (next.kind !== 'notes') setNoteCreateRequested(false)
+          }}
           onAddItem={() => openCreate(view.kind === 'template' && view.id ? view.id : null)}
+          onAddNote={openCreateNote}
           onOpenTemplates={() => setTemplatesOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           onLock={lock}
@@ -145,6 +159,10 @@ export function Vault() {
                   itemsSent: 0,
                   templatesReceived: 0,
                   templatesSent: 0,
+                  notesReceived: 0,
+                  notesSent: 0,
+                  foldersReceived: 0,
+                  foldersSent: 0,
                   remoteWasNewer: false,
                   completedAt: settings.lastSyncAt,
                 }
@@ -166,7 +184,9 @@ export function Vault() {
           </Button>
 
           <h1 className="flex-1 truncate text-sm font-medium">
-            {view.kind === 'all'
+            {view.kind === 'notes'
+              ? 'Note'
+              : view.kind === 'all'
               ? 'All items'
               : view.kind === 'expiring'
                 ? 'Expiring'
@@ -190,12 +210,24 @@ export function Vault() {
             <Settings />
           </Button>
           <ToggleThemeButton />
-          <Button size="sm" onClick={() => openCreate(null)}>
-            <Plus />
-            <span className="hidden sm:inline">Add</span>
-          </Button>
+          {view.kind === 'notes' ? null : (
+            <Button size="sm" onClick={() => openCreate(null)}>
+              <Plus />
+              <span className="hidden sm:inline">Add</span>
+            </Button>
+          )}
         </header>
 
+        {view.kind === 'notes' ? (
+          <div className="min-h-0 flex-1">
+            <NoteWorkspace
+              selectedId={selectedNoteId}
+              onSelect={setSelectedNoteId}
+              createRequested={noteCreateRequested}
+              onCreateHandled={() => setNoteCreateRequested(false)}
+            />
+          </div>
+        ) : (
         <div className="grid min-h-0 flex-1 md:grid-cols-[22rem_1fr]">
           <div className="flex min-h-0 flex-col border-r">
             {view.kind === 'tags' ? (
@@ -264,6 +296,7 @@ export function Vault() {
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* Mobile navigation */}
@@ -277,9 +310,14 @@ export function Vault() {
             view={view}
             onViewChange={(next) => {
               setView(next)
+              if (next.kind !== 'notes') setNoteCreateRequested(false)
               setMobileNavOpen(false)
             }}
             onAddItem={() => openCreate(null)}
+            onAddNote={() => {
+              openCreateNote()
+              setMobileNavOpen(false)
+            }}
             onOpenTemplates={() => {
               setTemplatesOpen(true)
               setMobileNavOpen(false)

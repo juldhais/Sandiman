@@ -171,3 +171,136 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+.note-markdown-editor .milkdown {
+  --crepe-color-background: transparent;
+  --crepe-color-on-background: var(--foreground);
+  --crepe-color-surface: var(--card);
+  --crepe-color-surface-low: var(--muted);
+  --crepe-color-on-surface: var(--card-foreground);
+  --crepe-color-on-surface-variant: var(--muted-foreground);
+  --crepe-color-outline: var(--border);
+  --crepe-color-primary: var(--primary);
+  --crepe-color-secondary: var(--secondary);
+  --crepe-color-on-secondary: var(--secondary-foreground);
+  --crepe-color-inverse: var(--foreground);
+  --crepe-color-on-inverse: var(--background);
+  --crepe-color-inline-code: var(--primary);
+  --crepe-color-error: var(--destructive);
+  --crepe-color-hover: var(--accent);
+  --crepe-color-selected: var(--accent);
+  --crepe-color-inline-area: var(--muted);
+  font-family: inherit;
+}
+
+.note-markdown-editor .milkdown .ProseMirror {
+  min-height: 55dvh;
+  padding: 0.75rem 0;
+}
+
+.note-markdown-editor .milkdown .ProseMirror {
+  color: var(--foreground);
+  caret-color: var(--foreground);
+}
+
+.note-markdown-editor .milkdown .ProseMirror h1 {
+  font-size: 2.1em;
+  margin-top: 0;
+}
+
+.note-markdown-editor .milkdown .ProseMirror h2 {
+  font-size: 1.8em;
+}
+
+.note-markdown-editor .milkdown .ProseMirror h3 {
+  font-size: 1.6em;
+}
+
+.note-markdown-editor .milkdown .ProseMirror > :is(h2, h3):first-child {
+  margin-top: 0.25rem;
+}
+
+.note-markdown-editor .milkdown .milkdown-toolbar {
+  background: var(--card);
+  border: 1px solid var(--foreground);
+  border-radius: 0.625rem;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 28%), 0 0 0 1px var(--background);
+}
+
+.note-markdown-editor .milkdown .milkdown-toolbar .toolbar-item,
+.note-markdown-editor .milkdown .milkdown-toolbar .toolbar-item svg {
+  color: var(--foreground);
+  fill: var(--foreground);
+}
+
+.note-markdown-editor .milkdown .milkdown-toolbar .toolbar-item:hover {
+  color: var(--accent-foreground);
+  background: var(--accent);
+}
+
+.note-markdown-editor .milkdown .milkdown-toolbar .toolbar-item:hover svg {
+  color: var(--accent-foreground);
+  fill: var(--accent-foreground);
+}
+
+.note-markdown-editor .milkdown .milkdown-toolbar .toolbar-item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.note-markdown-editor .milkdown .milkdown-toolbar .toolbar-item.active {
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.note-markdown-editor .milkdown .milkdown-toolbar .toolbar-item.active svg {
+  color: var(--primary-foreground);
+  fill: var(--primary-foreground);
+}
+
+.note-markdown-editor .milkdown .ProseMirror-gapcursor::after {
+  border-top: 2px solid var(--foreground);
+}
+
+.note-markdown-editor .milkdown .ProseMirror-focused {
+  --prosemirror-virtual-cursor-color: var(--foreground);
+}
+
+.note-markdown-editor .milkdown .crepe-drop-cursor {
+  background: var(--primary);
+  opacity: 0.9;
+}
+
+.note-markdown-editor .milkdown ul li::marker,
+.note-markdown-editor .milkdown ol li::marker,
+.note-markdown-editor .milkdown .milkdown-list-item-block .label-wrapper {
+  color: var(--foreground);
+}
+
+.note-markdown-editor .milkdown .milkdown-list-item-block .label-wrapper svg {
+  fill: var(--foreground);
+}
+
+.note-markdown-editor .milkdown hr {
+  height: 2px;
+  padding: 0;
+  background: var(--muted-foreground);
+  background-clip: border-box;
+}
+
+.note-markdown-editor .milkdown .milkdown-table-block th,
+.note-markdown-editor .milkdown .milkdown-table-block td {
+  color: var(--foreground);
+  background-color: var(--card);
+  border: 1px solid var(--muted-foreground);
+}
+
+.note-markdown-editor .milkdown .milkdown-table-block th {
+  background-color: var(--muted);
+  font-weight: 600;
+}
+
+.note-markdown-editor .milkdown .milkdown-table-block .selectedCell::after {
+  background: var(--primary);
+  opacity: 0.22;
+}

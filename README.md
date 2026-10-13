@@ -18,6 +18,7 @@ Vite · React 19 · TypeScript · Tailwind v4 · shadcn/ui · Zustand · Zod
   - [Vault lifecycle](#vault-lifecycle)
   - [Templates and fields](#templates-and-fields)
   - [Items](#items)
+  - [Standalone notes and folders](#standalone-notes-and-folders)
   - [Expiry tracking](#expiry-tracking)
   - [Copying secrets](#copying-secrets)
   - [Password generation](#password-generation)
@@ -32,9 +33,9 @@ Vite · React 19 · TypeScript · Tailwind v4 · shadcn/ui · Zustand · Zod
 The master password never leaves the browser. It is stretched with
 PBKDF2-HMAC-SHA256 (600,000 iterations) into a non-extractable AES-GCM-256 key,
 and vault data is encrypted under that key before anything touches disk. Local
-IndexedDB stores an encrypted header and one authenticated ciphertext per item;
-GitHub sync still uses a single encrypted payload envelope. The local header and
-sync envelope contain only:
+IndexedDB stores an encrypted header and one authenticated ciphertext per item
+and standalone note. GitHub stores the main encrypted payload, one encrypted file
+per note, and a separate encrypted folder manifest. Every envelope contains only:
 
 - the KDF descriptor (algorithm, iteration count, salt) — not secret
 - the envelope version — format metadata, not secret
@@ -47,7 +48,7 @@ no reset path, by design.
 ## IndexedDB layout
 
 The local database is named `sandiman` (initial IndexedDB version 1) and has
-three object stores. Secret-bearing content is encrypted before it is written;
+four object stores. Secret-bearing content is encrypted before it is written;
 the database does not store item titles, values, tags, or notes as plaintext.
 
 ### `vault` — encrypted header
@@ -64,10 +65,11 @@ One record, keyed by `key: "primary"`:
 
 `envelope.data` is AES-GCM ciphertext for the small local header JSON. That
 header contains the payload version, templates, settings (including local GitHub
-sync configuration), the timestamp, and `localItemCount`. Its `items` array is
-empty: item contents live in the `items` store below. `localItemCount` is
-encrypted and lets unlock detect missing item records. The envelope's KDF
-descriptor and IV are visible, but are not secret.
+sync configuration), the encrypted note-folder tree, the timestamp, and
+`localItemCount` / `localNoteCount`. Its `items` and `notes` arrays are empty:
+record contents live in their stores below. The encrypted counts let unlock
+detect missing records. The envelope's KDF descriptor and IV are visible, but
+are not secret.
 
 ### `items` — one encrypted record per item
 
@@ -91,6 +93,14 @@ record also updates the encrypted header's item count in the same IndexedDB
 transaction. A user delete is a soft-delete tombstone kept for sync, so it
 rewrites that item's ciphertext without reducing the record count.
 
+### `notes` — one encrypted record per standalone Markdown note
+
+Like `items`, this object store uses `id` as its key path. Each ciphertext holds
+the complete note: title, Markdown body, folder ID, timestamps, and deletion
+state. The note ID is authenticated as AES-GCM additional data. Folder names and
+the parent/child tree live in the encrypted `vault` header; folder IDs are not
+used as record keys. Existing notes without a folder ID are treated as Unfiled.
+
 ### `meta` — unencrypted bookkeeping
 
 This key/value store contains:
@@ -105,14 +115,16 @@ This key/value store contains:
 The KDF values and timestamps do not reveal the vault contents. The master
 password and raw encryption key are never stored.
 
-Local edits update the affected encrypted records and bookkeeping atomically.
-Unlock decrypts the header and all item records into memory. Changing the master
-password re-encrypts all of them under the new key. This is the initial storage
-layout; no migration from an earlier single-envelope layout is provided.
+Local edits prepare ciphertext before opening a transaction, then update the
+affected records, encrypted header, and bookkeeping atomically. Unlock decrypts
+the header and every item and note before exposing them to the UI. Changing the
+master password re-encrypts the header and all item/note records under the new
+key. No additional object store or IndexedDB version is needed for note folders.
 
-This local layout is separate from GitHub sync: sync still uploads one
-master-key-encrypted payload containing the shareable items, templates, and
-settings, without the local header markers or GitHub credentials.
+This local layout is separate from GitHub sync. GitHub stores the shareable
+items/templates/settings in `vault.json`, one encrypted file per note in
+`notes/<random-id>.json`, and the encrypted folder tree in `notes/folders.json`.
+The PAT and local header markers are not uploaded.
 
 ## Getting started
 
@@ -163,9 +175,10 @@ src/
 │   └── base64.ts          Encoding helpers
 │
 ├── storage/         The domain. Where the business rules live.
-│   ├── types.ts           FieldDef, VaultTemplate, VaultItem, VaultPayload
+│   ├── types.ts           FieldDef, VaultTemplate, VaultItem, VaultNote, folders
 │   ├── builtins.ts        Eight seeded templates
 │   ├── templateEngine.ts  Field resolution + runtime zod schemas
+│   ├── noteFolders.ts     Folder-tree validation and reference recovery
 │   ├── expiry.ts          Date parsing and urgency classification
 │   ├── schema.ts          zod schemas for decrypted payloads
 │   ├── db.ts              IndexedDB stores (via idb)
@@ -176,7 +189,7 @@ src/
 │
 ├── sync/            GitHub API transport and merge semantics
 │   ├── githubConfig.ts        Validate repository/token settings
-│   ├── github.ts              Octokit transport for encrypted file
+│   ├── github.ts              Octokit transport for vault, note, and folder files
 │   ├── merge.ts               Per-record conflict resolution
 │   ├── syncEngine.ts          read/SHA-check → merge → conditional commit
 │   └── types.ts               Sync config and outcome types
@@ -189,7 +202,7 @@ src/
 │
 ├── components/
 │   ├── ui/                 21 shadcn/ui primitives (Radix-based)
-│   ├── vault/              Sidebar, ItemList, ItemDetail, ItemForm, ExpiryDashboard
+│   ├── vault/              Item views, NoteWorkspace, folder tree/editor, expiry view
 │   ├── templates/          TemplateManager — list and field builder
 │   ├── sync/               SyncPanel
 │   ├── settings/           SettingsPanel
@@ -231,8 +244,9 @@ starts with zero items.
 
 **Unlocking** (`Unlock` → `unlock`) reads the encrypted header, derives a key
 from the supplied password and stored salt, then decrypts and validates every
-item record. A header authentication failure is reported as a *wrong password*;
-a damaged or missing item record is reported as corruption.
+item and standalone note record, along with the folder hierarchy. A header
+authentication failure is reported as a *wrong password*; a damaged or missing
+record is reported as corruption.
 
 **Locking** clears the key material from module scope and empties the decrypted
 state. Not just hiding it: leaving items rendered after a lock would defeat the
@@ -243,16 +257,19 @@ salt, then forces a re-lock so the new password is exercised immediately.
 
 ### Templates and fields
 
-A template is a list of field definitions. Each field has an id, a label, a
-type, and three flags — `required`, `copyable`, and `expiry`.
+A template is a list of field definitions. Each field has an id, a label, and a
+type. Required and copyable behavior are configurable; expiry behavior is
+determined by the field type.
 
 Eight templates are seeded: **Login, Credit Card, ID Card, Secure Note,
 Wireless Key, API Key, Software License, Database.** The first four come from
 the original spec; the rest exist because a password manager with only logins
 and cards is not much use, and between them they exercise every field type.
 
-Seven field types are supported — `text`, `masked`, `number`, `date`,
-`boolean`, `url`, `note` — each rendering a different control.
+Nine field types are supported — `text`, `masked`, `number`, `date`,
+`cardExpiry`, `expiryDate`, `boolean`, `url`, and `note` — each rendering a
+different control. `Card Expiry (MM/YY)` and `Expiry Date (DD/MM/YYYY)` fields
+are automatically tracked by the expiry dashboard.
 
 Built-in templates cannot be deleted, only edited or duplicated. Duplicating
 assigns **fresh field ids** so the copy and the original never share identity.
@@ -276,17 +293,38 @@ custom fields, tags, and free-text notes.
 map rather than stored, so "the user cleared this field" stays distinguishable
 from "this field was never set".
 
+### Standalone notes and folders
+
+Markdown notes are a separate feature from the **Secure Note** item template.
+Each note has a title, Markdown body, and optional folder assignment. Notes can
+be created immediately, searched, edited inline with automatic saves, moved
+between folders, and written in a rich Milkdown editor that stores Markdown
+source.
+
+Folders can be nested. Names must be unique among siblings, and moving a folder
+inside itself or one of its descendants is rejected. Deleting a folder does not
+delete notes or child folders: they are moved to the deleted folder's parent, or
+to Unfiled when it has no parent. Existing notes without a folder are Unfiled.
+
+The folder tree is encrypted in the local vault header. On GitHub, it is kept in
+the encrypted `notes/folders.json` manifest. Individual note files remain
+`notes/<random-id>.json`; folder names and hierarchy never appear in GitHub
+paths. The manifest and notes use the same master-password-derived AES-GCM key
+and SHA-based optimistic updates as the main vault file.
+
 ### Expiry tracking
 
-Any `date` field can be flagged `expiry`, which pulls every item using that
-field into the expiry dashboard.
+`Card Expiry (MM/YY)` and `Expiry Date (DD/MM/YYYY)` field types automatically
+pull every item using those fields into the expiry dashboard. Ordinary `Date`
+fields are not tracked as expiries. Previously saved templates that used the
+old expiry toggle continue to be recognized.
 
-Dates are stored as **free text**, because that is what documents actually show:
-`04/2028`, `2028-04`, `28/04/2028`. Parsing accepts several formats and treats a
-bare month/year as the *end* of that month — a card with expiry `04/2028` is
-still usable through April. Impossible dates like `31 February` are rejected
-rather than silently rolled forward, and anything unparseable is reported as
-`unparseable` instead of being quietly treated as "not expiring".
+`Card Expiry` requires `MM/YY` (for example `04/28`); `Expiry Date` requires the
+strict `DD/MM/YYYY` format (for example `31/12/2028`). Impossible dates like
+`31/02/2028` are rejected rather than silently rolled forward, and anything
+unparseable is reported as `unparseable` instead of being quietly treated as
+"not expiring". Legacy expiry fields continue to use the older flexible date
+parser.
 
 Each entry is classified relative to a configurable warning window (default 30
 days), with the tiers scaled to that window so the badges read the same
@@ -354,18 +392,19 @@ Locking clears key material and decrypted state from memory.
 
 ### Sync
 
-Sync is optional and off by default. It stores one encrypted JSON file in a
-GitHub repository; changed syncs create commits. A run skips if one is already
-in flight.
+Sync is optional and off by default. It stores the main encrypted vault in
+`vault.json`, one encrypted file per note in `notes/`, and the encrypted folder
+tree in `notes/folders.json`. Folder names are never used in GitHub paths.
+Changed syncs create commits. A run skips if one is already in flight.
 
-A run reads the remote file and its Git blob SHA, decrypts it, merges records
-per-item, and writes the encrypted merged payload back using that SHA. If another
-device updates the file between the read and write, the stale SHA is rejected
-and the sync reports a retryable conflict instead of silently overwriting it.
-An unchanged vault does not create an empty commit.
+A run reads each remote file and its Git blob SHA, decrypts it, merges records,
+and writes changed encrypted content back using that SHA. If another device
+updates a file between the read and write, the stale SHA is rejected and the
+sync reports a retryable conflict instead of silently overwriting it. An
+unchanged vault does not create an empty commit.
 
-**Merging is per record, not wholesale.** Each item and template resolves
-independently by `updatedAt`, with two refinements:
+**Merging is per record, not wholesale.** Each item, template, note, and folder
+resolves independently by `updatedAt`, with two refinements:
 
 - a delete beats an edit from the same instant (ties in milliseconds are real
   when two devices save together)
@@ -389,11 +428,11 @@ it authorizes file access but cannot decrypt the vault.
 
 Use a **private repository** and a fine-grained personal access token scoped to
 that repository with **Contents: read and write** permission. Configure the
-owner, repository, optional branch, encrypted-file path, and PAT in Sync
-settings. The PAT is stored only inside the locally encrypted vault and is
-removed by `toSyncPayload()` before upload. The local last-sync timestamp is
-also excluded, so a routine sync does not create a commit just to record that
-it ran. The PAT is never logged or placed in the remote file.
+owner, repository, optional branch, and PAT in Sync settings. The main encrypted
+file name is fixed to `vault.json`. The PAT is stored only inside the locally
+encrypted vault and is removed by `toSyncPayload()` before upload. The local
+last-sync timestamp is also excluded, so a routine sync does not create a commit
+just to record that it ran. The PAT is never logged or placed in a remote file.
 
 GitHub commit history retains older encrypted copies even after a new version
 is committed or the current file is deleted. The Contents API has file-size
@@ -409,13 +448,13 @@ non-extractable `CryptoKey`, which structured clone carries by reference — raw
 key material never crosses the boundary and cannot be read back even from the
 returned handle.
 
-**Local item records are encrypted independently.** This keeps ordinary saves
-proportional to the changed item rather than the full vault. The tradeoff is
-that someone inspecting IndexedDB can observe the number and approximate sizes
-of encrypted records, and notice which record changes. Random item IDs are the
-only item fields used as storage keys; content and labels stay encrypted.
-GitHub sync remains a single encrypted payload and does not use this local
-record layout.
+**Local items and notes are encrypted independently.** This keeps ordinary saves
+proportional to changed records rather than the full vault. Someone inspecting
+IndexedDB can observe the number and approximate sizes of encrypted records, and
+notice which record changes. Random record IDs are the only item/note fields used
+as storage keys; content and labels stay encrypted. Folder names and hierarchy
+are held in the encrypted local header. GitHub uses independent per-note files
+and an encrypted folder manifest rather than this local record layout.
 
 **Tombstones are retained across saves.** This one is subtle and was a real bug.
 The store keeps deleted items in `deletedItems` separately from the visible

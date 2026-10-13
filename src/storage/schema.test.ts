@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { githubSyncConfigSchema, itemSchema, storedSyncSettingsSchema } from '@/storage/schema'
+import { githubSyncConfigSchema, itemSchema, noteSchema, storedSyncSettingsSchema } from '@/storage/schema'
 
 const baseItem = {
   id: 'item-1',
@@ -39,6 +39,20 @@ describe('item schema field preferences', () => {
   })
 })
 
+describe('standalone note schema', () => {
+  it('validates note identity and preserves Markdown source', () => {
+    expect(noteSchema.parse({
+      id: 'note-1',
+      title: '  Meeting  ',
+      markdown: '**agenda**\n- next steps',
+      createdAt: 10,
+      updatedAt: 20,
+      deleted: false,
+    })).toMatchObject({ title: 'Meeting', markdown: '**agenda**\n- next steps' })
+    expect(noteSchema.safeParse({ id: '', title: 'Bad', markdown: '' }).success).toBe(false)
+  })
+})
+
 describe('GitHub sync configuration', () => {
   it('keeps repository and PAT settings while dropping unknown fields', () => {
     const config = githubSyncConfigSchema.parse({
@@ -54,7 +68,7 @@ describe('GitHub sync configuration', () => {
 
     expect(config.owner).toBe('example-owner')
     expect(config.repo).toBe('vault')
-    expect(config.path).toBe('private/vault.json')
+    expect(config.path).toBe('vault.json')
     expect(config.token).toBe('github_pat_test-secret')
     expect('email' in config).toBe(false)
     expect(config.autoSync).toBe(true)

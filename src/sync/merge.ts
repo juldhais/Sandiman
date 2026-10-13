@@ -16,6 +16,8 @@
  */
 import type {
   VaultItem,
+  VaultNote,
+  VaultNoteFolder,
   VaultPayload,
   VaultSettings,
   VaultTemplate,
@@ -124,6 +126,22 @@ export function mergeItems(
   local: readonly VaultItem[],
   remote: readonly VaultItem[],
 ): MergeResult<VaultItem[]> {
+  return mergeRecords(local, remote)
+}
+
+/** Merges standalone notes with the same conflict and tombstone rules as items. */
+export function mergeNotes(
+  local: readonly VaultNote[],
+  remote: readonly VaultNote[],
+): MergeResult<VaultNote[]> {
+  return mergeRecords(local, remote)
+}
+
+/** Merges folder names and parent relationships by folder ID and timestamp. */
+export function mergeNoteFolders(
+  local: readonly VaultNoteFolder[],
+  remote: readonly VaultNoteFolder[],
+): MergeResult<VaultNoteFolder[]> {
   return mergeRecords(local, remote)
 }
 

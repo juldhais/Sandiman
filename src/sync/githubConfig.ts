@@ -1,5 +1,5 @@
 /** Lightweight GitHub destination validation for settings, with no SDK import. */
-import type { GitHubSyncConfig } from './types'
+import { DEFAULT_VAULT_PATH, type GitHubSyncConfig } from './types'
 
 const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
 const REPO_PATTERN = /^[A-Za-z0-9._-]{1,100}$/
@@ -14,14 +14,13 @@ export class ConfigError extends Error {
 /**
  * Validates the destination and returns a normalised copy.
  *
- * Whitespace is trimmed because tokens and names are usually pasted. The path
- * is rejected if it could escape the repository root or name a directory.
+ * Whitespace is trimmed because tokens and names are usually pasted. The
+ * remote filename is fixed so every device syncs the same vault file.
  */
 export function normaliseConfig(config: GitHubSyncConfig): GitHubSyncConfig {
   const owner = config.owner.trim()
   const repo = config.repo.trim().replace(/\.git$/i, '')
   const branch = config.branch.trim()
-  const path = config.path.trim().replace(/^\/+/, '')
   const token = config.token.trim()
 
   if (!token) throw new ConfigError('The personal access token is empty')
@@ -30,14 +29,9 @@ export function normaliseConfig(config: GitHubSyncConfig): GitHubSyncConfig {
   if (!REPO_PATTERN.test(repo) || repo === '.' || repo === '..') {
     throw new ConfigError('The repository name is not valid')
   }
-  if (!path || path.endsWith('/')) throw new ConfigError('The file path must name a file')
-  if (path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')) {
-    throw new ConfigError('The file path must not contain empty, "." or ".." segments')
-  }
-  if (/[\\\0]/.test(path)) throw new ConfigError('The file path contains an invalid character')
   if (/\s/.test(branch)) throw new ConfigError('The branch name must not contain spaces')
 
-  return { ...config, owner, repo, branch, path, token }
+  return { ...config, owner, repo, branch, path: DEFAULT_VAULT_PATH, token }
 }
 
 /** Summarises the destination without ever echoing the token. */

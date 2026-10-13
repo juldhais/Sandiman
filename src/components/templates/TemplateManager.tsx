@@ -44,7 +44,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { Switch } from '@/components/ui/switch'
 import { TemplateIcon } from '@/components/TemplateIcon'
 
 const FIELD_TYPE_LABELS: Record<FieldType, string> = {
@@ -53,6 +52,7 @@ const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   number: 'Number',
   date: 'Date',
   cardExpiry: 'Card expiry (MM/YY)',
+  expiryDate: 'Expiry Date (DD/MM/YYYY)',
   boolean: 'Yes / No',
   url: 'URL',
   note: 'Multi-line note',
@@ -138,8 +138,8 @@ function TemplateList({
       <SheetHeader>
         <SheetTitle>Templates</SheetTitle>
         <SheetDescription>
-          Templates define which fields an item has. Built-in templates can be
-          edited or duplicated, but not deleted.
+          Templates define which fields an item has. Built-in templates cannot be
+          deleted. Create a standalone note from the Notes section.
         </SheetDescription>
       </SheetHeader>
 
@@ -227,7 +227,7 @@ function NewTemplateForm({
   const [name, setName] = useState('')
   const [icon, setIcon] = useState('Square')
   const [fields, setFields] = useState<FieldDef[]>([
-    { id: 'value', label: 'Value', type: 'masked', required: true, copyable: true, expiry: false },
+    { id: 'value', label: 'Value', type: 'masked', required: true, copyable: true },
   ])
 
   return (
@@ -328,7 +328,6 @@ function NewTemplateForm({
                     type: 'text',
                     required: false,
                     copyable: false,
-                    expiry: false,
                   },
                 ])
               }
@@ -364,7 +363,6 @@ function NewTemplateForm({
                     type: 'masked',
                     required: true,
                     copyable: true,
-                    expiry: false,
                   },
                 ])
                 setOpen(false)
@@ -474,7 +472,6 @@ function TemplateEditor({
                     type: 'text',
                     required: false,
                     copyable: false,
-                    expiry: false,
                   },
                 ])
               }
@@ -527,7 +524,7 @@ function TemplateEditor({
 
                 <Select
                   value={field.type}
-                  onValueChange={(type: FieldType) => updateField(field.id, { type })}
+                  onValueChange={(type: FieldType) => updateField(field.id, { type, expiry: false })}
                 >
                   <SelectTrigger className="w-36" aria-label={`Field ${index + 1} type`}>
                     <SelectValue />
@@ -576,20 +573,26 @@ function TemplateEditor({
                   Copyable
                 </label>
 
-                <label className="flex items-center gap-1.5 text-xs">
-                  <Switch
-                    checked={field.expiry}
-                    disabled={field.type !== 'date' && field.type !== 'cardExpiry'}
-                    onCheckedChange={(expiry) => updateField(field.id, { expiry })}
-                  />
-                  Expiry
-                </label>
               </div>
 
-              {(field.type === 'date' || field.type === 'cardExpiry') && field.expiry ? (
+              {field.type === 'cardExpiry' || field.type === 'expiryDate' ||
+              (field.type === 'date' && field.expiry) ? (
                 <Alert className="py-2">
                   <Info className="size-3.5" />
                   <AlertDescription className="text-xs">
+                    {field.type === 'cardExpiry' ? (
+                      <>Enter <code>MM/YY</code>, for example <code>04/28</code>.</>
+                    ) : field.type === 'expiryDate' ? (
+                      <>Enter <code>DD/MM/YYYY</code>, for example <code>31/12/2028</code>.</>
+                    ) : (
+                      <>
+                        Accepted formats include <code>YYYY-MM-DD</code>, <code>YYYY-MM</code>,{' '}
+                        <code>MM/YYYY</code>, <code>MM/DD</code>, <code>MM/DD/YYYY</code>, and{' '}
+                        <code>MM/DD/YY</code>. <code>DD/MM/YYYY</code> is also recognized when the
+                        first number is greater than 12; otherwise slash dates are read as
+                        <code>MM/DD</code>.
+                      </>
+                    )}{' '}
                     Items using this field appear in the expiry dashboard.
                   </AlertDescription>
                 </Alert>

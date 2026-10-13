@@ -43,6 +43,10 @@ export function SyncPanel({
   const settings = useVaultStore((state) => state.settings)
   const items = useVaultStore((state) => state.items)
   const deletedItems = useVaultStore((state) => state.deletedItems)
+  const notes = useVaultStore((state) => state.notes)
+  const deletedNotes = useVaultStore((state) => state.deletedNotes)
+  const noteFolders = useVaultStore((state) => state.noteFolders)
+  const deletedNoteFolders = useVaultStore((state) => state.deletedNoteFolders)
   const templates = useVaultStore((state) => state.templates)
   const updateSyncConfig = useVaultStore((state) => state.updateSyncConfig)
   const updateSettings = useVaultStore((state) => state.updateSettings)
@@ -85,6 +89,8 @@ export function SyncPanel({
         payload: {
           version: VAULT_PAYLOAD_VERSION,
           items: [...items, ...deletedItems],
+          notes: [...notes, ...deletedNotes],
+          noteFolders: [...noteFolders, ...deletedNoteFolders],
           templates,
           settings,
           updatedAt: Date.now(),
@@ -93,16 +99,21 @@ export function SyncPanel({
       })
 
       // Keep this device's PAT and repository configuration; neither is uploaded.
-      await applyMergedPayload({ ...result.mergedPayload, sync: { config } })
+      await applyMergedPayload({
+        ...result.mergedPayload,
+        notes: result.mergedNotes,
+        noteFolders: result.mergedFolders,
+        sync: { config },
+      })
       await updateSettings({ lastSyncAt: result.outcome.completedAt })
 
       const { outcome, initialUpload } = result
       const summary = initialUpload
-        ? 'First sync complete. The encrypted vault file was created in GitHub.'
-        : outcome.itemsReceived > 0 || outcome.templatesReceived > 0
-          ? `Pulled ${outcome.itemsReceived} item(s) from GitHub and kept ${outcome.itemsSent} local change(s).`
+        ? `First sync complete. The encrypted vault, ${outcome.notesSent} note file(s), and ${outcome.foldersSent} folder(s) were synced to GitHub.`
+        : outcome.itemsReceived > 0 || outcome.templatesReceived > 0 || outcome.notesReceived > 0 || outcome.foldersReceived > 0
+          ? `Pulled ${outcome.itemsReceived} item(s), ${outcome.notesReceived} note(s), and ${outcome.foldersReceived} folder(s); kept ${outcome.itemsSent + outcome.notesSent + outcome.foldersSent} local change(s).`
           : outcome.direction === 'push'
-            ? 'Encrypted vault changes committed to GitHub.'
+            ? `Encrypted vault, ${outcome.notesSent} note change(s), and ${outcome.foldersSent} folder change(s) committed to GitHub.`
             : 'Everything is already up to date.'
 
       setLastRun(summary)
@@ -172,17 +183,6 @@ export function SyncPanel({
                 autoComplete="off"
               />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="sync-path">Encrypted file path</Label>
-            <Input
-              id="sync-path"
-              value={config.path}
-              onChange={(event) => updateSyncConfig({ path: event.target.value })}
-              placeholder="vault-encrypted.json"
-              autoComplete="off"
-            />
           </div>
 
           <div className="space-y-2">

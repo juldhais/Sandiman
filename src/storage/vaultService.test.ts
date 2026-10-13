@@ -8,7 +8,7 @@ import {
   unlock,
   WrongPasswordError,
 } from '@/storage/vaultService'
-import { readEnvelope, readItemRecords } from '@/storage/db'
+import { readEnvelope, readItemRecords, readNoteRecords } from '@/storage/db'
 import { emptyPayload } from '@/storage/vaultService'
 import { VAULT_PAYLOAD_VERSION, type VaultPayload } from '@/storage/types'
 import { decryptRecord, decryptVault } from '@/crypto/aes'
@@ -136,6 +136,40 @@ describe('vault storage lifecycle', () => {
     expect(serialised).not.toContain('Secret entry')
   })
 
+  it('stores standalone Markdown notes in their own encrypted records', async () => {
+    const folder = {
+      id: 'folder-1',
+      name: 'Private folder name',
+      parentId: null,
+      createdAt: 1,
+      updatedAt: 1,
+      deleted: false,
+    }
+    const note = {
+      id: 'note-1',
+      title: 'Private title',
+      markdown: '# Private body',
+      folderId: folder.id,
+      createdAt: 10,
+      updatedAt: 20,
+      deleted: false,
+    }
+    await seed('master-password', { ...emptyPayload(1000), notes: [note], noteFolders: [folder] })
+
+    const envelope = await readEnvelope()
+    const records = await readNoteRecords()
+    expect(records).toHaveLength(1)
+    expect(JSON.stringify({ envelope, records })).not.toContain('Private title')
+    expect(JSON.stringify({ envelope, records })).not.toContain('Private body')
+    expect(JSON.stringify({ envelope, records })).not.toContain(folder.name)
+
+    const key = await derive('master-password', envelope!.kdf)
+    const header = await decryptVault(envelope!, key)
+    expect((header as unknown as { localNoteCount: number }).localNoteCount).toBe(1)
+    expect((header as unknown as VaultPayload).noteFolders).toEqual([folder])
+    await expect(decryptRecord(records[0]!.ciphertext, key, 'note:note-1')).resolves.toEqual(note)
+  })
+
   it('rewrites only changed item ciphertext during an incremental save', async () => {
     const payload = {
       ...emptyPayload(1000),
@@ -224,12 +258,24 @@ describe('payload versioning', () => {
     const payload: VaultPayload = {
       ...emptyPayload(0),
       sync: { config: { token: 'github_pat_sync-secret' } as never },
+      notes: [{
+        id: 'note-1', title: 'private note', markdown: 'private markdown',
+        createdAt: 1, updatedAt: 1, deleted: false,
+      }],
+      noteFolders: [{
+        id: 'folder-1', name: 'private folder name', parentId: null,
+        createdAt: 1, updatedAt: 1, deleted: false,
+      }],
     }
 
     const shared = toSyncPayload(payload)
 
     expect(shared).not.toHaveProperty('sync')
+    expect(shared).not.toHaveProperty('notes')
+    expect(shared).not.toHaveProperty('noteFolders')
     expect(JSON.stringify(shared)).not.toContain('github_pat_sync-secret')
+    expect(JSON.stringify(shared)).not.toContain('private markdown')
+    expect(JSON.stringify(shared)).not.toContain('private folder name')
     expect(shared.settings.lastSyncAt).toBeNull()
   })
 })

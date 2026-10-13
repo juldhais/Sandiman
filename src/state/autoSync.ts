@@ -18,6 +18,10 @@ export function useAutoSync(): void {
   const settings = useVaultStore((state) => state.settings)
   const items = useVaultStore((state) => state.items)
   const deletedItems = useVaultStore((state) => state.deletedItems)
+  const notes = useVaultStore((state) => state.notes)
+  const deletedNotes = useVaultStore((state) => state.deletedNotes)
+  const noteFolders = useVaultStore((state) => state.noteFolders)
+  const deletedNoteFolders = useVaultStore((state) => state.deletedNoteFolders)
   const templates = useVaultStore((state) => state.templates)
   const updateSettings = useVaultStore((state) => state.updateSettings)
   const applyMergedPayload = useVaultStore((state) => state.applyMergedPayload)
@@ -33,6 +37,8 @@ export function useAutoSync(): void {
       const payload: VaultPayload = {
         version: VAULT_PAYLOAD_VERSION,
         items: [...items, ...deletedItems],
+        notes: [...notes, ...deletedNotes],
+        noteFolders: [...noteFolders, ...deletedNoteFolders],
         templates,
         settings,
         updatedAt: Date.now(),
@@ -41,7 +47,12 @@ export function useAutoSync(): void {
 
       const result = await runSync({ config, payload })
 
-      await applyMergedPayload({ ...result.mergedPayload, sync: { config } })
+      await applyMergedPayload({
+        ...result.mergedPayload,
+        notes: result.mergedNotes,
+        noteFolders: result.mergedFolders,
+        sync: { config },
+      })
       await updateSettings({ lastSyncAt: result.outcome.completedAt })
     } catch (cause) {
       // Background failures are surfaced once and then ignored: repeating a
@@ -55,7 +66,7 @@ export function useAutoSync(): void {
     } finally {
       runningRef.current = false
     }
-  }, [applyMergedPayload, config, deletedItems, items, settings, templates, updateSettings])
+  }, [applyMergedPayload, config, deletedItems, deletedNotes, deletedNoteFolders, items, noteFolders, notes, settings, templates, updateSettings])
 
   useEffect(() => {
     if (!enabled) return

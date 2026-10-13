@@ -16,6 +16,7 @@ export const FIELD_TYPES = [
   'number',
   'date',
   'cardExpiry',
+  'expiryDate',
   'boolean',
   'url',
   'note',
@@ -36,8 +37,8 @@ export interface FieldDef {
   required: boolean
   /** Renders a click-to-copy button next to the value. */
   copyable: boolean
-  /** Marks a date-like field as an expiry, which drives dashboard warnings. */
-  expiry: boolean
+  /** Legacy saved templates may still carry this pre-type expiry marker. */
+  expiry?: boolean
   placeholder?: string
   defaultValue?: string
 }
@@ -100,6 +101,20 @@ export interface VaultItem extends Syncable {
   notes: string
 }
 
+/** A standalone Markdown note, stored separately from ordinary vault items. */
+export interface VaultNote extends Syncable {
+  title: string
+  markdown: string
+  /** Null means Unfiled. Folder names never appear in note file paths. */
+  folderId?: string | null
+}
+
+/** A folder in the nested standalone-note tree. */
+export interface VaultNoteFolder extends Syncable {
+  name: string
+  parentId: string | null
+}
+
 export interface VaultSettings {
   /** Seconds before a copied secret is overwritten in the clipboard. */
   clipboardClearSeconds: number
@@ -128,10 +143,14 @@ export interface StoredSyncSettings {
   config: GitHubSyncConfig
 }
 
-/** The decrypted vault body used in memory and as the GitHub sync payload. */
+/** Decrypted local vault body; standalone notes are omitted from the vault file sent to GitHub. */
 export interface VaultPayload {
   version: number
   items: VaultItem[]
+  /** Local encrypted record collection; notes sync as individual GitHub files. */
+  notes?: VaultNote[]
+  /** Local encrypted folder tree; syncs in its own encrypted manifest. */
+  noteFolders?: VaultNoteFolder[]
   templates: VaultTemplate[]
   settings: VaultSettings
   updatedAt: number
@@ -139,21 +158,28 @@ export interface VaultPayload {
   sync?: StoredSyncSettings
   /** Encrypted integrity check for the number of separately stored items. */
   localItemCount?: number
+  /** Encrypted integrity check for the separately stored local notes. */
+  localNoteCount?: number
 }
 
 /** Payload version, bumped when the item/template shape changes incompatibly. */
 export const VAULT_PAYLOAD_VERSION = 1
 
 /**
- * Projects the vault body onto the subset shared with other devices.
+ * Projects the vault body onto the subset stored in the shared vault file.
  *
- * GitHub credentials and the local sync timestamp are excluded so neither the
- * PAT nor sync-only bookkeeping creates a remote commit.
+ * GitHub credentials, standalone notes, and sync-only bookkeeping are excluded
+ * from the main vault file.
  */
-export function toSyncPayload(payload: VaultPayload): Omit<VaultPayload, 'sync'> {
+export function toSyncPayload(
+  payload: VaultPayload,
+): Omit<VaultPayload, 'sync' | 'notes' | 'noteFolders' | 'localItemCount' | 'localNoteCount'> {
   const {
     sync: _sync,
     localItemCount: _localItemCount,
+    localNoteCount: _localNoteCount,
+    notes: _notes,
+    noteFolders: _noteFolders,
     ...shared
   } = payload
   return { ...shared, settings: { ...shared.settings, lastSyncAt: null } }

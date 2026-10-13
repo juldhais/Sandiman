@@ -3,26 +3,30 @@
  *
  * This module owns the one invariant that matters most: the derived master key
  * lives only as a local variable or in the store's memory, and is never
- * written to storage. Local item records and their header are encrypted
- * independently; GitHub sync continues to use one encrypted payload envelope.
+ * written to storage. Local item and note records and their header are encrypted
+ * independently; GitHub sync keeps notes in per-note encrypted files.
  */
 import { DecryptError, decryptRecord, decryptVault, encryptRecord, encryptVault } from '@/crypto/aes'
 import { createKdfParams, deriveKey } from '@/crypto/kdf'
 import type { Envelope, KdfParams } from '@/crypto/envelope'
 import { createBuiltinTemplates } from './builtins'
+import { validateFolderTree } from './noteFolders'
 import {
   isInitialized,
   readEnvelope,
   readItemRecords,
+  readNoteRecords,
   replaceLocalVault,
   writeLocalChanges,
   type StoredItemRecord,
+  type StoredNoteRecord,
 } from './db'
-import { itemSchema, parseVaultPayload } from './schema'
+import { itemSchema, noteSchema, parseVaultPayload } from './schema'
 import {
   DEFAULT_SETTINGS,
   VAULT_PAYLOAD_VERSION,
   type VaultPayload,
+  type VaultNote,
 } from './types'
 import { DEFAULT_GITHUB_SYNC_CONFIG, type GitHubSyncConfig } from '@/sync/types'
 
@@ -65,6 +69,8 @@ export function emptyPayload(
   return {
     version: VAULT_PAYLOAD_VERSION,
     items: [],
+    notes: [],
+    noteFolders: [],
     templates: createBuiltinTemplates(now),
     settings: { ...DEFAULT_SETTINGS },
     updatedAt: now,
@@ -78,7 +84,10 @@ function localHeader(payload: VaultPayload): VaultPayload {
   return {
     ...payload,
     items: [],
+    notes: [],
+    noteFolders: payload.noteFolders ?? [],
     localItemCount: payload.items.length,
+    localNoteCount: payload.notes?.length ?? 0,
   }
 }
 
@@ -89,6 +98,8 @@ export function getHeaderSignature(payload: VaultPayload): string {
     settings: payload.settings,
     sync: payload.sync,
     itemCount: payload.items.length,
+    noteCount: payload.notes?.length ?? 0,
+    noteFolders: payload.noteFolders ?? [],
   })
 }
 
@@ -99,11 +110,27 @@ async function encryptItems(items: VaultPayload['items'], key: CryptoKey): Promi
   })))
 }
 
+async function encryptNotes(notes: readonly VaultNote[], key: CryptoKey): Promise<StoredNoteRecord[]> {
+  return Promise.all(notes.map(async (note) => ({
+    id: note.id,
+    ciphertext: await encryptRecord(note, key, `note:${note.id}`),
+  })))
+}
+
 async function decodeVault(envelope: Envelope, key: CryptoKey): Promise<VaultPayload> {
   const decoded = parseVaultPayload(await decryptVault(envelope, key))
+  try {
+    validateFolderTree(decoded.noteFolders ?? [])
+  } catch {
+    throw new DecryptError('corrupt-payload', 'The local note-folder hierarchy is invalid')
+  }
   const records = await readItemRecords()
+  const noteRecords = await readNoteRecords()
   if (decoded.localItemCount !== records.length) {
     throw new DecryptError('corrupt-payload', 'The local item records are incomplete')
+  }
+  if ((decoded.localNoteCount ?? 0) !== noteRecords.length) {
+    throw new DecryptError('corrupt-payload', 'The local note records are incomplete')
   }
   const items = await Promise.all(records.map(async (record) => {
     try {
@@ -119,19 +146,38 @@ async function decodeVault(envelope: Envelope, key: CryptoKey): Promise<VaultPay
       throw new DecryptError('corrupt-payload', 'A local item does not match the vault schema')
     }
   }))
-  return { ...decoded, items }
+  const notes = await Promise.all(noteRecords.map(async (record) => {
+    try {
+      const note = noteSchema.parse(
+        await decryptRecord<unknown>(record.ciphertext, key, `note:${record.id}`),
+      )
+      if (note.id !== record.id) {
+        throw new DecryptError('corrupt-payload', 'Note ID does not match its encrypted record')
+      }
+      return note
+    } catch (cause) {
+      if (cause instanceof DecryptError) throw cause
+      throw new DecryptError('corrupt-payload', 'A local note does not match the vault schema')
+    }
+  }))
+  const activeFolderIds = new Set((decoded.noteFolders ?? []).filter((folder) => !folder.deleted).map((folder) => folder.id))
+  if (notes.some((note) => note.folderId && !activeFolderIds.has(note.folderId))) {
+    throw new DecryptError('corrupt-payload', 'A local note refers to a missing folder')
+  }
+  return { ...decoded, items, notes }
 }
 
 async function installVault(payload: VaultPayload, key: CryptoKey, kdf: KdfParams, now: number) {
   const header = await encryptVault(localHeader(payload), key, kdf)
   const records = await encryptItems(payload.items, key)
-  await replaceLocalVault({ header, records, kdf, now })
+  const noteRecords = await encryptNotes(payload.notes ?? [], key)
+  await replaceLocalVault({ header, records, noteRecords, kdf, now })
   return header
 }
 
 /**
  * Creates the vault: derives a fresh key, seeds built-in templates, and
- * writes an encrypted header and encrypted item records.
+ * writes an encrypted header and encrypted item/note records.
  */
 export async function createVault(
   password: string,
@@ -147,7 +193,7 @@ export async function createVault(
   const payload = emptyPayload(now, syncConfig)
 
   const header = await encryptVault(localHeader(payload), key, kdf)
-  await replaceLocalVault({ header, records: [], kdf, now, createdAt: now })
+  await replaceLocalVault({ header, records: [], noteRecords: [], kdf, now, createdAt: now })
 
   return { payload, key, kdf, elapsedMs }
 }
@@ -235,10 +281,21 @@ export async function savePayloadChanges(
   deletedItemIds: string[],
   headerChanged: boolean,
   now: number = Date.now(),
+  changedNotes: readonly VaultNote[] = [],
+  deletedNoteIds: string[] = [],
 ): Promise<void> {
   const header = headerChanged ? await encryptVault(localHeader(payload), key, kdf) : undefined
   const upserts = await encryptItems(changedItems, key)
-  await writeLocalChanges({ header, upserts, deletes: deletedItemIds, kdf, now })
+  const noteUpserts = await encryptNotes(changedNotes, key)
+  await writeLocalChanges({
+    header,
+    upserts,
+    deletes: deletedItemIds,
+    noteUpserts,
+    noteDeletes: deletedNoteIds,
+    kdf,
+    now,
+  })
 }
 
 /**

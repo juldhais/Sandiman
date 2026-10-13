@@ -111,6 +111,17 @@ describe('collectExpiries', () => {
     expect(summary.warning + summary.critical).toBeGreaterThan(0)
   })
 
+  it('finds an Expiry Date field using DD/MM/YYYY', () => {
+    const item: VaultItem = {
+      ...login({ expirationDate: '31/12/2028' }),
+      templateId: 'builtin-id-card',
+    }
+    const summary = collectExpiries([item], templates, 30, NOW)
+
+    expect(summary.entries).toHaveLength(1)
+    expect(summary.entries[0]!.expiresAt?.toISOString()).toBe('2028-12-31T23:59:59.999Z')
+  })
+
   it('ignores deleted items', () => {
     const card: VaultItem = {
       ...login({}),

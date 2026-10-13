@@ -20,7 +20,7 @@ export interface GitHubSyncConfig {
   autoSyncMinutes: number
 }
 
-export const DEFAULT_VAULT_PATH = 'vault-encrypted.json'
+export const DEFAULT_VAULT_PATH = 'vault.json'
 
 export const DEFAULT_GITHUB_SYNC_CONFIG: GitHubSyncConfig = {
   owner: '',
@@ -61,6 +61,10 @@ export interface SyncOutcome {
   itemsSent: number
   templatesReceived: number
   templatesSent: number
+  notesReceived: number
+  notesSent: number
+  foldersReceived: number
+  foldersSent: number
   /** True when the remote file was newer than anything held locally. */
   remoteWasNewer: boolean
   completedAt: number
@@ -73,6 +77,10 @@ export const EMPTY_SYNC_OUTCOME: SyncOutcome = {
   itemsSent: 0,
   templatesReceived: 0,
   templatesSent: 0,
+  notesReceived: 0,
+  notesSent: 0,
+  foldersReceived: 0,
+  foldersSent: 0,
   remoteWasNewer: false,
   completedAt: 0,
 }

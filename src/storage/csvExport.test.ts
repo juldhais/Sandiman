@@ -16,7 +16,6 @@ function item(overrides: Partial<VaultItem> = {}): VaultItem {
         type: 'text',
         required: false,
         copyable: false,
-        expiry: false,
         value: '123',
       },
     ],

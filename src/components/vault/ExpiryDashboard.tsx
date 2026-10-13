@@ -38,8 +38,8 @@ export function ExpiryDashboard({
         <Inbox className="text-muted-foreground size-8" />
         <p className="text-sm font-medium">Nothing to track</p>
         <p className="text-muted-foreground max-w-xs text-sm">
-          Mark a date or card-expiry field as an expiry on a template and items using it will
-          appear here.
+          Use the Card Expiry or Expiry Date field type in a template to have items appear here
+          automatically as their expiry approaches.
         </p>
       </div>
     )

@@ -9,6 +9,7 @@
 import { expiryFields, type ResolvedField } from '@/storage/templateEngine'
 import type { VaultItem, VaultTemplate } from '@/storage/types'
 import { parseCardExpiryDate } from '@/storage/cardExpiry'
+import { parseExpiryDateValue } from '@/storage/dateExpiry'
 
 export type ExpiryStatus = 'expired' | 'critical' | 'warning' | 'ok' | 'unparseable'
 
@@ -135,6 +136,8 @@ function toEntry(
   const expiresAt =
     field.def.type === 'cardExpiry'
       ? parseCardExpiryDate(field.value)
+      : field.def.type === 'expiryDate'
+        ? parseExpiryDateValue(field.value)
       : parseExpiryDate(field.value)
   const daysRemaining = expiresAt ? daysUntil(expiresAt, now) : null
 

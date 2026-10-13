@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/PasswordInput'
 import { QuickGenerator } from '@/components/PasswordGenerator'
 import { formatCardExpiryInput } from '@/storage/cardExpiry'
+import { formatExpiryDateInput } from '@/storage/dateExpiry'
 import type { FieldDef } from '@/storage/types'
 
 export interface FieldControlProps {
@@ -118,6 +119,22 @@ export function FieldControl({
         />
       )
 
+    case 'expiryDate':
+      return (
+        <Input
+          id={id}
+          type="text"
+          inputMode="numeric"
+          maxLength={10}
+          value={value}
+          onChange={(event) => onChange(formatExpiryDateInput(event.target.value))}
+          onBlur={onBlur}
+          placeholder={def.placeholder ?? 'DD/MM/YYYY'}
+          className="font-mono-numbers"
+          {...aria}
+        />
+      )
+
     case 'url':
       return (
         <Input
@@ -192,7 +209,7 @@ export function FieldDisplay({ value, type }: { value: string; type: FieldDef['t
   return (
     <span
       className={
-        type === 'number' || type === 'date' || type === 'cardExpiry'
+        type === 'number' || type === 'date' || type === 'cardExpiry' || type === 'expiryDate'
           ? 'font-mono-numbers'
           : undefined
       }

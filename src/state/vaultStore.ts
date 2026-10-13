@@ -6,16 +6,17 @@
  * whoever can read this store can read the vault, so it lives in memory only
  * and never touches storage.
  *
- * Items are persisted as separate authenticated ciphertexts. The encrypted
- * header holds templates and settings, so editing one item does not re-encrypt
- * unrelated item data.
+ * Items and standalone notes are persisted as separate authenticated
+ * ciphertexts. The encrypted header holds templates and settings, so editing a
+ * record does not re-encrypt unrelated data.
  */
 import { create } from 'zustand'
 import type { KdfParams } from '@/crypto/envelope'
 import { DecryptError } from '@/crypto/aes'
 import { cancelPendingClear } from '@/lib/clipboard'
 import { newId } from '@/lib/id'
-import { createBuiltinTemplates, isBuiltinTemplateId } from '@/storage/builtins'
+import { createBuiltinTemplates, isBuiltinTemplateId, LEGACY_NOTE_TEMPLATE_ID } from '@/storage/builtins'
+import { validateFolderPlacement, validateFolderTree } from '@/storage/noteFolders'
 import { clearSyncSessionKey } from '@/sync/syncEngine'
 import {
   removeItemFields,
@@ -27,6 +28,8 @@ import {
   DEFAULT_SETTINGS,
   VAULT_PAYLOAD_VERSION,
   type VaultItem,
+  type VaultNote,
+  type VaultNoteFolder,
   type VaultPayload,
   type VaultSettings,
   type VaultTemplate,
@@ -51,6 +54,11 @@ export interface VaultStore {
   ready: boolean
 
   items: VaultItem[]
+  notes: VaultNote[]
+  /** Deleted note tombstones retained until remote sync propagates them. */
+  deletedNotes: VaultNote[]
+  noteFolders: VaultNoteFolder[]
+  deletedNoteFolders: VaultNoteFolder[]
   /**
    * Soft-deleted items, kept out of the UI but retained in memory so their
    * tombstones still reach the sync payload.
@@ -101,6 +109,14 @@ export interface VaultStore {
   deleteItem: (id: string) => Promise<void>
   restoreItem: (id: string) => Promise<void>
 
+  addNote: (title: string, markdown: string, folderId?: string | null) => Promise<VaultNote>
+  updateNote: (id: string, changes: Pick<VaultNote, 'title' | 'markdown' | 'folderId'>) => Promise<void>
+  deleteNote: (id: string) => Promise<void>
+  restoreNote: (id: string) => Promise<void>
+  addNoteFolder: (name: string, parentId: string | null) => Promise<VaultNoteFolder>
+  updateNoteFolder: (id: string, changes: Pick<VaultNoteFolder, 'name' | 'parentId'>) => Promise<void>
+  deleteNoteFolder: (id: string) => Promise<string | null>
+
   addTemplate: (
     template: Omit<VaultTemplate, 'id' | 'createdAt' | 'updatedAt' | 'deleted'>,
   ) => Promise<VaultTemplate | null>
@@ -124,6 +140,7 @@ let masterKdf: KdfParams | null = null
 let writeSequence = 0
 let persistQueue: Promise<void> = Promise.resolve()
 let persistedItems = new Map<string, VaultItem>()
+let persistedNotes = new Map<string, VaultNote>()
 let persistedHeaderSignature = ''
 
 function hasSession(): boolean {
@@ -137,11 +154,13 @@ function clearSession(): void {
   clearSyncSessionKey()
   cancelPendingClear()
   persistedItems = new Map()
+  persistedNotes = new Map()
   persistedHeaderSignature = ''
 }
 
 function rememberPersistedPayload(payload: VaultPayload): void {
   persistedItems = new Map(payload.items.map((item) => [item.id, item]))
+  persistedNotes = new Map((payload.notes ?? []).map((note) => [note.id, note]))
   persistedHeaderSignature = getHeaderSignature(payload)
 }
 
@@ -150,6 +169,8 @@ function toPayload(state: VaultStore): VaultPayload {
     version: VAULT_PAYLOAD_VERSION,
     // Tombstones included so deletes propagate. See `deletedItems` above.
     items: [...state.items, ...state.deletedItems],
+    notes: [...state.notes, ...state.deletedNotes],
+    noteFolders: [...state.noteFolders, ...state.deletedNoteFolders],
     templates: state.templates,
     settings: state.settings,
     updatedAt: Date.now(),
@@ -175,6 +196,10 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
       const currentIds = new Set(payload.items.map((item) => item.id))
       const changedItems = payload.items.filter((item) => persistedItems.get(item.id) !== item)
       const deletedIds = [...persistedItems.keys()].filter((id) => !currentIds.has(id))
+      const notes = payload.notes ?? []
+      const currentNoteIds = new Set(notes.map((note) => note.id))
+      const changedNotes = notes.filter((note) => persistedNotes.get(note.id) !== note)
+      const deletedNoteIds = [...persistedNotes.keys()].filter((id) => !currentNoteIds.has(id))
       const headerChanged = getHeaderSignature(payload) !== persistedHeaderSignature
 
       await savePayloadChanges(
@@ -184,6 +209,9 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
         changedItems,
         deletedIds,
         headerChanged,
+        Date.now(),
+        changedNotes,
+        deletedNoteIds,
       )
       rememberPersistedPayload(payload)
     })
@@ -204,10 +232,20 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
   }
 
   function adoptPayload(payload: VaultPayload): void {
+    const templates = payload.templates.length > 0 ? payload.templates : createBuiltinTemplates()
+    const migratedTemplates = templates.map((template) =>
+      template.id === LEGACY_NOTE_TEMPLATE_ID && !template.deleted
+        ? { ...template, deleted: true, updatedAt: Math.max(Date.now(), template.updatedAt + 1) }
+        : template,
+    )
     set({
       items: payload.items.filter((item) => !item.deleted),
       deletedItems: payload.items.filter((item) => item.deleted),
-      templates: payload.templates.length > 0 ? payload.templates : createBuiltinTemplates(),
+      notes: (payload.notes ?? []).filter((note) => !note.deleted),
+      deletedNotes: (payload.notes ?? []).filter((note) => note.deleted),
+      noteFolders: (payload.noteFolders ?? []).filter((folder) => !folder.deleted),
+      deletedNoteFolders: (payload.noteFolders ?? []).filter((folder) => folder.deleted),
+      templates: migratedTemplates,
       settings: { ...DEFAULT_SETTINGS, ...payload.settings },
       sync: {
         config: { ...DEFAULT_GITHUB_SYNC_CONFIG, ...(payload.sync?.config ?? {}) },
@@ -231,6 +269,10 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
     screen: 'loading',
     ready: false,
     items: [],
+    notes: [],
+    deletedNotes: [],
+    noteFolders: [],
+    deletedNoteFolders: [],
     deletedItems: [],
     templates: [],
     settings: { ...DEFAULT_SETTINGS },
@@ -306,6 +348,10 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
       set({
         screen: 'unlock',
         items: [],
+        notes: [],
+        deletedNotes: [],
+        noteFolders: [],
+        deletedNoteFolders: [],
         deletedItems: [],
         sync: { config: { ...DEFAULT_GITHUB_SYNC_CONFIG } },
         error: null,
@@ -417,6 +463,153 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
         }
       })
       await persist()
+    },
+
+    async addNote(title, markdown, folderId = null) {
+      const now = Date.now()
+      if (folderId && !get().noteFolders.some((folder) => folder.id === folderId)) {
+        throw new Error('The selected folder no longer exists')
+      }
+      const note: VaultNote = {
+        id: newId(),
+        title: title.trim() || 'Untitled',
+        markdown,
+        folderId,
+        createdAt: now,
+        updatedAt: now,
+        deleted: false,
+      }
+      set((state) => ({ notes: [...state.notes, note] }))
+      await persist()
+      return note
+    },
+
+    async updateNote(id, changes) {
+      if (changes.folderId && !get().noteFolders.some((folder) => folder.id === changes.folderId)) {
+        throw new Error('The selected folder no longer exists')
+      }
+      const now = Date.now()
+      set((state) => ({
+        notes: state.notes.map((note) =>
+          note.id === id
+            ? {
+                ...note,
+                title: changes.title.trim() || 'Untitled',
+                markdown: changes.markdown,
+                folderId: changes.folderId === undefined ? note.folderId ?? null : changes.folderId,
+                updatedAt: now,
+              }
+            : note,
+        ),
+      }))
+      await persist()
+    },
+
+    async deleteNote(id) {
+      const now = Date.now()
+      set((state) => {
+        const note = state.notes.find((candidate) => candidate.id === id)
+        if (!note) return state
+        return {
+          notes: state.notes.filter((candidate) => candidate.id !== id),
+          deletedNotes: [...state.deletedNotes, { ...note, updatedAt: now, deleted: true }],
+        }
+      })
+      await persist()
+    },
+
+    async restoreNote(id) {
+      const now = Date.now()
+      set((state) => {
+        const note = state.deletedNotes.find((candidate) => candidate.id === id)
+        if (!note) return state
+        return {
+          notes: [...state.notes, { ...note, updatedAt: now, deleted: false }],
+          deletedNotes: state.deletedNotes.filter((candidate) => candidate.id !== id),
+        }
+      })
+      await persist()
+    },
+
+    async addNoteFolder(name, parentId) {
+      const now = Date.now()
+      const folder: VaultNoteFolder = {
+        id: newId(),
+        name: name.trim(),
+        parentId,
+        createdAt: now,
+        updatedAt: now,
+        deleted: false,
+      }
+      if (!folder.name) throw new Error('Enter a folder name')
+      validateFolderPlacement(get().noteFolders, folder.id, parentId, folder.name)
+      set((state) => ({ noteFolders: [...state.noteFolders, folder] }))
+      await persist()
+      return folder
+    },
+
+    async updateNoteFolder(id, changes) {
+      const current = get().noteFolders.find((folder) => folder.id === id)
+      if (!current) return
+      const name = changes.name.trim()
+      if (!name) throw new Error('Enter a folder name')
+      validateFolderPlacement(get().noteFolders, id, changes.parentId, name)
+      const now = Date.now()
+      set((state) => ({
+        noteFolders: state.noteFolders.map((folder) =>
+          folder.id === id ? { ...folder, name, parentId: changes.parentId, updatedAt: now } : folder,
+        ),
+      }))
+      await persist()
+    },
+
+    async deleteNoteFolder(id) {
+      const folder = get().noteFolders.find((candidate) => candidate.id === id)
+      if (!folder) return null
+      const parentId = folder.parentId && get().noteFolders.some((candidate) => candidate.id === folder.parentId)
+        ? folder.parentId
+        : null
+      const now = Date.now()
+      set((state) => {
+        const moving = state.noteFolders.filter((candidate) => !candidate.deleted && candidate.parentId === id)
+        const siblingNames = new Set(state.noteFolders
+          .filter((candidate) => !candidate.deleted && candidate.parentId === parentId && candidate.id !== id && candidate.parentId !== id)
+          .map((candidate) => candidate.name.trim().toLowerCase()))
+        const movedNames = new Map<string, string>()
+        for (const child of moving) {
+          const base = child.name
+          let unique = base
+          let suffix = 2
+          while (siblingNames.has(unique.toLowerCase())) {
+            unique = `${base} (${suffix})`
+            suffix += 1
+          }
+          siblingNames.add(unique.toLowerCase())
+          movedNames.set(child.id, unique)
+        }
+        const noteFolders = state.noteFolders.map((candidate) =>
+          candidate.id === id
+            ? { ...candidate, deleted: true, updatedAt: now }
+            : candidate.parentId === id
+              ? { ...candidate, name: movedNames.get(candidate.id) ?? candidate.name, parentId, updatedAt: now }
+              : candidate,
+        )
+        const activeFolders = noteFolders.filter((candidate) => !candidate.deleted)
+        const deletedFolders = noteFolders.filter((candidate) => candidate.deleted)
+        validateFolderTree([...activeFolders, ...state.deletedNoteFolders, ...deletedFolders])
+        return {
+          noteFolders: activeFolders,
+          deletedNoteFolders: [...state.deletedNoteFolders, ...deletedFolders],
+          notes: state.notes.map((note) => note.folderId === id
+            ? { ...note, folderId: parentId, updatedAt: now }
+            : note),
+          deletedNotes: state.deletedNotes.map((note) => note.folderId === id
+            ? { ...note, folderId: parentId, updatedAt: now }
+            : note),
+        }
+      })
+      await persist()
+      return parentId
     },
 
     async addTemplate(definition) {
