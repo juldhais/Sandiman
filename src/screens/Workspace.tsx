@@ -5,8 +5,13 @@
  * browsing and editing state; all data shown here is already decrypted.
  */
 import { useRef, useState } from 'react'
-import { Menu, Plus } from 'lucide-react'
+import { Loader2, Menu, Plus, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
 import { useVaultStore } from '@/state/vaultStore'
+import { SyncError, runSync } from '@/sync/syncEngine'
+import { isSyncConfigured } from '@/sync/types'
+import { VAULT_PAYLOAD_VERSION } from '@/storage/types'
+import { verifyMasterPassword } from '@/storage/vaultService'
 import { Button } from '@/components/ui/button'
 import {
   Sheet,
@@ -30,7 +35,10 @@ export function Workspace() {
   const noteFolders = useVaultStore((state) => state.noteFolders)
   const templates = useVaultStore((state) => state.templates)
   const settings = useVaultStore((state) => state.settings)
+  const syncConfig = useVaultStore((state) => state.sync.config)
   const lock = useVaultStore((state) => state.lock)
+  const applyMergedPayload = useVaultStore((state) => state.applyMergedPayload)
+  const updateSettings = useVaultStore((state) => state.updateSettings)
 
   const [view, setView] = useState<ModuleView>({ module: 'vault', view: { kind: 'all' } })
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
@@ -41,6 +49,8 @@ export function Workspace() {
   const createToken = useRef(0)
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [lastSyncMessage, setLastSyncMessage] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
@@ -117,6 +127,64 @@ export function Workspace() {
     setMobileNavOpen(false)
   }
 
+  async function handleSyncNow(
+    masterPassword = '',
+    previousMasterPassword = '',
+  ): Promise<boolean> {
+    if (syncing || !isSyncConfigured(syncConfig)) return false
+    setSyncing(true)
+    try {
+      const currentState = useVaultStore.getState()
+      if (masterPassword && !(await verifyMasterPassword(masterPassword))) {
+        throw new SyncError('wrong-master-password', 'That is not this vault’s master password.')
+      }
+
+      const result = await runSync({
+        config: syncConfig,
+        masterPassword,
+        previousMasterPassword,
+        payload: {
+          version: VAULT_PAYLOAD_VERSION,
+          items: [...currentState.items, ...currentState.deletedItems],
+          notes: [...currentState.notes, ...currentState.deletedNotes],
+          noteFolders: [...currentState.noteFolders, ...currentState.deletedNoteFolders],
+          templates: currentState.templates,
+          settings: currentState.settings,
+          updatedAt: Date.now(),
+          sync: { config: syncConfig },
+        },
+      })
+
+      await applyMergedPayload({
+        ...result.mergedPayload,
+        notes: result.mergedNotes,
+        noteFolders: result.mergedFolders,
+        sync: { config: syncConfig },
+      })
+      await updateSettings({ lastSyncAt: result.outcome.completedAt })
+
+      const { outcome, initialUpload } = result
+      const summary = initialUpload
+        ? `First sync complete. The encrypted vault, ${outcome.notesSent} note file(s), and ${outcome.foldersSent} folder(s) were synced to GitHub.`
+        : outcome.itemsReceived > 0 || outcome.templatesReceived > 0 || outcome.notesReceived > 0 || outcome.foldersReceived > 0
+          ? `Pulled ${outcome.itemsReceived} item(s), ${outcome.notesReceived} note(s), and ${outcome.foldersReceived} folder(s); kept ${outcome.itemsSent + outcome.notesSent + outcome.foldersSent} local change(s).`
+          : outcome.direction === 'push'
+            ? `Encrypted vault, ${outcome.notesSent} note change(s), and ${outcome.foldersSent} folder change(s) committed to GitHub.`
+            : 'Everything is already up to date.'
+
+      setLastSyncMessage(summary)
+      toast.success(initialUpload ? 'Vault uploaded' : 'Sync complete', { description: summary })
+      return true
+    } catch (cause) {
+      const message = cause instanceof SyncError ? cause.message : 'The sync could not be completed'
+      setLastSyncMessage(message)
+      toast.error('Sync failed', { description: message })
+      return false
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const sidebarProps: SidebarProps = {
     view: activeView,
     onViewChange: handleViewChange,
@@ -157,6 +225,17 @@ export function Workspace() {
           </Button>
 
           <h1 className="flex-1 truncate text-sm font-medium">{currentTitle()}</h1>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleSyncNow()}
+            disabled={!isSyncConfigured(syncConfig) || syncing}
+            aria-label="Sync now"
+          >
+            {syncing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+            <span className="hidden sm:inline">Sync now</span>
+          </Button>
 
           {view.module === 'notes' ? (
             <Button size="sm" onClick={openCreateNote}>
@@ -206,7 +285,13 @@ export function Workspace() {
       </Sheet>
 
       <TemplateManager open={templatesOpen} onOpenChange={setTemplatesOpen} />
-      <SyncPanel open={syncOpen} onOpenChange={setSyncOpen} />
+      <SyncPanel
+        open={syncOpen}
+        onOpenChange={setSyncOpen}
+        onSync={handleSyncNow}
+        syncing={syncing}
+        lastRun={lastSyncMessage}
+      />
       <SettingsPanel open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   )

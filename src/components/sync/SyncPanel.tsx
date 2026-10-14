@@ -3,18 +3,15 @@ import { useMemo, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
-  CloudUpload,
   Info,
   Loader2,
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { describeDestination } from '@/sync/githubConfig'
-import { SyncError, runSync, verifySyncCredentials } from '@/sync/syncEngine'
+import { verifySyncCredentials } from '@/sync/syncEngine'
 import { isSyncConfigured, missingSyncFields } from '@/sync/types'
 import { useVaultStore } from '@/state/vaultStore'
-import { VAULT_PAYLOAD_VERSION } from '@/storage/types'
-import { verifyMasterPassword } from '@/storage/vaultService'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -35,29 +32,24 @@ import {
 export function SyncPanel({
   open,
   onOpenChange,
+  onSync,
+  syncing,
+  lastRun,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onSync: (masterPassword: string, previousMasterPassword: string) => Promise<boolean>
+  syncing: boolean
+  lastRun: string | null
 }) {
   const config = useVaultStore((state) => state.sync.config)
   const settings = useVaultStore((state) => state.settings)
-  const items = useVaultStore((state) => state.items)
-  const deletedItems = useVaultStore((state) => state.deletedItems)
-  const notes = useVaultStore((state) => state.notes)
-  const deletedNotes = useVaultStore((state) => state.deletedNotes)
-  const noteFolders = useVaultStore((state) => state.noteFolders)
-  const deletedNoteFolders = useVaultStore((state) => state.deletedNoteFolders)
-  const templates = useVaultStore((state) => state.templates)
   const updateSyncConfig = useVaultStore((state) => state.updateSyncConfig)
-  const updateSettings = useVaultStore((state) => state.updateSettings)
-  const applyMergedPayload = useVaultStore((state) => state.applyMergedPayload)
 
   const [masterPassword, setMasterPassword] = useState('')
   const [previousMasterPassword, setPreviousMasterPassword] = useState('')
   const [verifying, setVerifying] = useState(false)
-  const [syncing, setSyncing] = useState(false)
   const [verification, setVerification] = useState<{ ok: boolean; text: string } | null>(null)
-  const [lastRun, setLastRun] = useState<string | null>(null)
 
   const missing = useMemo(() => missingSyncFields(config), [config])
   const destination = useMemo(() => describeDestination(config), [config])
@@ -72,60 +64,6 @@ export function SyncPanel({
       else toast.error('Could not access the GitHub repository', { description: result.summary })
     } finally {
       setVerifying(false)
-    }
-  }
-
-  async function handleSync(): Promise<void> {
-    setSyncing(true)
-    try {
-      if (masterPassword && !(await verifyMasterPassword(masterPassword))) {
-        throw new SyncError('wrong-master-password', 'That is not this vault’s master password.')
-      }
-
-      const result = await runSync({
-        config,
-        masterPassword,
-        previousMasterPassword,
-        payload: {
-          version: VAULT_PAYLOAD_VERSION,
-          items: [...items, ...deletedItems],
-          notes: [...notes, ...deletedNotes],
-          noteFolders: [...noteFolders, ...deletedNoteFolders],
-          templates,
-          settings,
-          updatedAt: Date.now(),
-          sync: { config },
-        },
-      })
-
-      // Keep this device's PAT and repository configuration; neither is uploaded.
-      await applyMergedPayload({
-        ...result.mergedPayload,
-        notes: result.mergedNotes,
-        noteFolders: result.mergedFolders,
-        sync: { config },
-      })
-      await updateSettings({ lastSyncAt: result.outcome.completedAt })
-
-      const { outcome, initialUpload } = result
-      const summary = initialUpload
-        ? `First sync complete. The encrypted vault, ${outcome.notesSent} note file(s), and ${outcome.foldersSent} folder(s) were synced to GitHub.`
-        : outcome.itemsReceived > 0 || outcome.templatesReceived > 0 || outcome.notesReceived > 0 || outcome.foldersReceived > 0
-          ? `Pulled ${outcome.itemsReceived} item(s), ${outcome.notesReceived} note(s), and ${outcome.foldersReceived} folder(s); kept ${outcome.itemsSent + outcome.notesSent + outcome.foldersSent} local change(s).`
-          : outcome.direction === 'push'
-            ? `Encrypted vault, ${outcome.notesSent} note change(s), and ${outcome.foldersSent} folder change(s) committed to GitHub.`
-            : 'Everything is already up to date.'
-
-      setLastRun(summary)
-      setMasterPassword('')
-      setPreviousMasterPassword('')
-      toast.success(initialUpload ? 'Vault uploaded' : 'Sync complete', { description: summary })
-    } catch (cause) {
-      const message = cause instanceof SyncError ? cause.message : 'The sync could not be completed'
-      toast.error('Sync failed', { description: message })
-      setLastRun(message)
-    } finally {
-      setSyncing(false)
     }
   }
 
@@ -313,10 +251,17 @@ export function SyncPanel({
               </Button>
               <Button
                 size="sm"
-                onClick={() => void handleSync()}
+                onClick={() => {
+                  void onSync(masterPassword, previousMasterPassword).then((success) => {
+                    if (success) {
+                      setMasterPassword('')
+                      setPreviousMasterPassword('')
+                    }
+                  })
+                }}
                 disabled={syncing || missing.length > 0}
               >
-                {syncing ? <Loader2 className="animate-spin" /> : <CloudUpload />}
+                {syncing ? <Loader2 className="animate-spin" /> : null}
                 Sync now
               </Button>
             </div>
