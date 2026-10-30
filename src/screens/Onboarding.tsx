@@ -6,7 +6,7 @@
  * their mind about easily.
  */
 import { useMemo, useState } from 'react'
-import { AlertTriangle, Eye, KeyRound, Loader2, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, Eye, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { estimateStrength } from '@/generator/password'
 import { useVaultStore } from '@/state/vaultStore'
