@@ -494,7 +494,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
           note.id === id
             ? {
                 ...note,
-                title: changes.title.trim() || 'Untitled',
+                title: changes.title.trim(),
                 markdown: changes.markdown,
                 folderId: changes.folderId === undefined ? note.folderId ?? null : changes.folderId,
                 updatedAt: now,

@@ -218,7 +218,7 @@ function NoteEditor({
     ) return
 
     const currentRevision = ++revision.current
-    const persistedDraft = { ...draft, title: draft.title.trim() || 'Untitled' }
+    const persistedDraft = { ...draft, title: draft.title.trim() }
     let savePromise: Promise<void> | null = null
     const save = (): Promise<void> => {
       if (savePromise) return savePromise
@@ -258,7 +258,7 @@ function NoteEditor({
   async function moveNote(): Promise<void> {
     const folderId = moveTarget === '__unfiled__' ? null : moveTarget
     const currentFolderId = note.folderId ?? null
-    const currentDraft = { title: title.trim() || 'Untitled', markdown, folderId: currentFolderId }
+    const currentDraft = { title: title.trim(), markdown, folderId: currentFolderId }
     const movedDraft = { ...currentDraft, folderId }
     setMoveError(null)
     setSaveStatus('saving')
@@ -297,7 +297,7 @@ function NoteEditor({
 
   return (
     <>
-    <article className="mx-auto max-w-3xl p-5 sm:p-8">
+    <article className="mx-auto max-w-3xl p-5 pl-12 sm:p-8 sm:pl-16">
       <header className="mb-5 flex items-center gap-2 border-b pb-4">
         <Button variant="ghost" size="icon" className="-ml-2 shrink-0 md:hidden" onClick={() => void leaveEditor()} aria-label="Back to notes">
           <ArrowLeft />
@@ -309,7 +309,6 @@ function NoteEditor({
             onChange={(event) => setTitle(event.target.value)}
             onBlur={flushPendingSave}
             className="h-auto w-full border-transparent px-1 text-xl font-semibold shadow-none focus-visible:border-input"
-            placeholder="Untitled"
           />
           <p className="text-muted-foreground truncate px-1 text-xs">
             {currentFolder ? folderPath(currentFolder, folders) : 'Unfiled'}

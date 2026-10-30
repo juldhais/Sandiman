@@ -49,6 +49,7 @@ describe('standalone note schema', () => {
       updatedAt: 20,
       deleted: false,
     })).toMatchObject({ title: 'Meeting', markdown: '**agenda**\n- next steps' })
+    expect(noteSchema.parse({ id: 'note-2', title: '   ', markdown: '' }).title).toBe('')
     expect(noteSchema.safeParse({ id: '', title: 'Bad', markdown: '' }).success).toBe(false)
   })
 })

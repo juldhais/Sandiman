@@ -72,7 +72,7 @@ export const itemSchema = z.object({
 
 export const noteSchema = z.object({
   id: z.string().min(1),
-  title: z.string().trim().min(1).catch('Untitled'),
+  title: z.string().trim().catch(''),
   markdown: z.string().catch(''),
   folderId: z.string().nullable().catch(null),
   createdAt: epochMs(0),

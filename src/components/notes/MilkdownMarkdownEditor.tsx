@@ -6,9 +6,11 @@ import '@milkdown/crepe/theme/common/list-item.css'
 import '@milkdown/crepe/theme/common/placeholder.css'
 import '@milkdown/crepe/theme/common/toolbar.css'
 import '@milkdown/crepe/theme/common/table.css'
+import '@milkdown/crepe/theme/common/block-edit.css'
 import '@milkdown/crepe/theme/classic.css'
 import { useEffect, useRef, useState } from 'react'
 import { CrepeBuilder } from '@milkdown/crepe/builder'
+import { blockEdit } from '@milkdown/crepe/feature/block-edit'
 import { cursor } from '@milkdown/crepe/feature/cursor'
 import { linkTooltip } from '@milkdown/crepe/feature/link-tooltip'
 import { listItem } from '@milkdown/crepe/feature/list-item'
@@ -39,6 +41,7 @@ export function MilkdownMarkdownEditor({
       // Build only the note-authoring features used here. The high-level Crepe
       // preset also pulls a full code-language catalog and optional math/image
       // tooling into the static application bundle.
+      .addFeature(blockEdit)
       .addFeature(cursor)
       .addFeature(linkTooltip)
       .addFeature(listItem)

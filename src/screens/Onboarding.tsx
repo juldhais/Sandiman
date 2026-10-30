@@ -244,7 +244,6 @@ export function Onboarding() {
           ) : null}
 
           <Button type="submit" className="w-full" disabled={!canSubmit} loading={busy}>
-            {busy ? <Loader2 className="animate-spin" /> : <KeyRound />}
             Create vault
           </Button>
         </form>
