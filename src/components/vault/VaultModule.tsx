@@ -143,7 +143,13 @@ export function VaultModule({
           </div>
         </div>
 
-        <div className="min-h-0">
+        <div
+          className={
+            selected && view.kind !== 'expiring'
+              ? 'bg-background fixed inset-0 z-40 h-dvh min-h-0 md:static md:z-auto md:h-full'
+              : 'min-h-0'
+          }
+        >
           {view.kind === 'expiring' ? (
             <ExpiryDashboard summary={expiry} onSelectItem={setSelectedId} />
           ) : selected ? (
@@ -152,14 +158,11 @@ export function VaultModule({
               item={selected}
               template={selected.templateId ? (templateById.get(selected.templateId) ?? null) : null}
               expiries={expiriesByItem.get(selected.id) ?? []}
+              onBack={() => setSelectedId(null)}
               onEdit={() => openEdit(selected)}
               onDelete={() => setPendingDelete(selected.id)}
             />
-          ) : (
-            <div className="text-muted-foreground flex h-full items-center justify-center p-8 text-center text-sm">
-              Select an item to see its details.
-            </div>
-          )}
+          ) : null}
         </div>
       </div>
 

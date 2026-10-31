@@ -72,7 +72,7 @@ export function NoteFolderTree({
           >
             <Folder className="size-4 shrink-0" />
             <span className="truncate">{folder.name}</span>
-            <span className="text-muted-foreground text-[10px]">{countIn(folder.id)}</span>
+            <span className="text-muted-foreground text-[11px]">{countIn(folder.id)}</span>
           </button>
           <Button disabled={disabled} size="icon-sm" variant="ghost" className="size-6 opacity-100 md:opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label={`Add subfolder to ${folder.name}`} onClick={() => createFolder(folder.id)}>
             <FolderPlus />
@@ -144,7 +144,7 @@ function FolderChoice({
       <span className="size-6 shrink-0" aria-hidden="true" />
       <Folder className="size-4 shrink-0" />
       <span>{label}</span>
-      <span className="text-muted-foreground text-[10px]">{count}</span>
+      <span className="text-muted-foreground text-[12px]">{count}</span>
     </button>
   )
 }

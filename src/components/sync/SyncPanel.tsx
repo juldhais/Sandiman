@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { describeDestination } from '@/sync/githubConfig'
-import { verifySyncCredentials } from '@/sync/syncEngine'
+import { hasSyncSessionKey, verifySyncCredentials } from '@/sync/syncEngine'
 import { isSyncConfigured, missingSyncFields } from '@/sync/types'
 import { useVaultStore } from '@/state/vaultStore'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -45,9 +45,11 @@ export function SyncPanel({
   const config = useVaultStore((state) => state.sync.config)
   const settings = useVaultStore((state) => state.settings)
   const updateSyncConfig = useVaultStore((state) => state.updateSyncConfig)
+  const sessionKeyAvailable = hasSyncSessionKey()
 
   const [masterPassword, setMasterPassword] = useState('')
   const [previousMasterPassword, setPreviousMasterPassword] = useState('')
+  const [showMasterPassword, setShowMasterPassword] = useState(false)
   const [verifying, setVerifying] = useState(false)
   const [verification, setVerification] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -74,6 +76,7 @@ export function SyncPanel({
         if (!nextOpen) {
           setMasterPassword('')
           setPreviousMasterPassword('')
+          setShowMasterPassword(false)
         }
         onOpenChange(nextOpen)
       }}
@@ -147,20 +150,34 @@ export function SyncPanel({
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="sync-master-password">Vault master password</Label>
-            <PasswordInput
-              id="sync-master-password"
-              value={masterPassword}
-              onChange={(event) => setMasterPassword(event.target.value)}
-              autoComplete="current-password"
-              spellCheck={false}
-            />
-            <p className="text-muted-foreground text-xs">
-              Needed for the first sync after unlock. It derives the remote encryption key and is
-              used only in memory.
-            </p>
-          </div>
+          {sessionKeyAvailable ? (
+            <div className="space-y-2">
+              <p className="text-muted-foreground text-xs">
+                Ready to sync without re-entering your master password. This lasts until you lock the vault.
+              </p>
+              {!showMasterPassword ? (
+                <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setShowMasterPassword(true)}>
+                  Enter master password instead
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!sessionKeyAvailable || showMasterPassword ? (
+            <div className="space-y-2">
+              <Label htmlFor="sync-master-password">Vault master password</Label>
+              <PasswordInput
+                id="sync-master-password"
+                value={masterPassword}
+                onChange={(event) => setMasterPassword(event.target.value)}
+                autoComplete="current-password"
+                spellCheck={false}
+              />
+              <p className="text-muted-foreground text-xs">
+                Needed for the first sync after unlock. The derived key is kept only in memory until you lock the vault.
+              </p>
+            </div>
+          ) : null}
 
           <div className="space-y-2">
             <Label htmlFor="sync-previous-password">Previous master password (if needed)</Label>

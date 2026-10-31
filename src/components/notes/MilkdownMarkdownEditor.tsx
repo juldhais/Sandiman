@@ -74,7 +74,7 @@ export function MilkdownMarkdownEditor({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           rows={20}
-          className="min-h-[55dvh] resize-y font-mono text-base"
+          className="min-h-[55dvh] resize-y font-mono text-[1rem] leading-6"
           spellCheck
         />
       </div>

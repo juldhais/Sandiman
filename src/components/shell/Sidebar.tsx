@@ -153,7 +153,7 @@ export function Sidebar({
               <NavItem icon={<CalendarClock />} label="Expiring" count={attention} emphasis={attention > 0} active={activeVaultView?.kind === 'expiring'} onClick={() => changeVaultView({ kind: 'expiring' })} />
               <NavItem icon={<Tags />} label="Tags" count={tags.length} active={activeVaultView?.kind === 'tags'} onClick={() => changeVaultView({ kind: 'tags' })} />
               {templatesWithItems.length || items.some((item) => !item.templateId) ? (
-                <li className="text-muted-foreground px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide uppercase">Templates</li>
+                <li className="text-muted-foreground px-2 pt-2 pb-1 text-[13px] font-medium tracking-wide uppercase">Templates</li>
               ) : null}
               {templatesWithItems.map((template) => (
                 <NavItem

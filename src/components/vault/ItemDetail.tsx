@@ -6,7 +6,7 @@
  * until revealed individually.
  */
 import { useMemo, useState } from 'react'
-import { Eye, EyeOff, ExternalLink, Pencil, Trash2 } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff, ExternalLink, Pencil, Trash2 } from 'lucide-react'
 import { populatedFields, resolveFields } from '@/storage/templateEngine'
 import type { ExpiryEntry } from '@/storage/expiry'
 import type { VaultItem, VaultTemplate } from '@/storage/types'
@@ -24,11 +24,12 @@ export interface ItemDetailProps {
   item: VaultItem
   template: VaultTemplate | null
   expiries: readonly ExpiryEntry[]
+  onBack: () => void
   onEdit: () => void
   onDelete: () => void
 }
 
-export function ItemDetail({ item, template, expiries, onEdit, onDelete }: ItemDetailProps) {
+export function ItemDetail({ item, template, expiries, onBack, onEdit, onDelete }: ItemDetailProps) {
   const settings = useVaultStore((state) => state.settings)
 
   // Field ids the user has chosen to reveal. Reset when switching items so a
@@ -67,6 +68,15 @@ export function ItemDetail({ item, template, expiries, onEdit, onDelete }: ItemD
   return (
     <div className="scrollbar-slim h-full overflow-y-auto">
       <header className="bg-card/50 sticky top-0 z-10 flex items-start gap-3 border-b px-5 py-4 backdrop-blur">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="-ml-2 md:hidden"
+          onClick={onBack}
+          aria-label="Back to items"
+        >
+          <ArrowLeft />
+        </Button>
         <span className="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-xl">
           <TemplateIcon icon={template?.icon ?? 'Square'} className="size-5" />
         </span>

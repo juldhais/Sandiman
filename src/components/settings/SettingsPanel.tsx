@@ -203,7 +203,11 @@ export function SettingsPanel({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right">
+      <SheetContent
+        side="right"
+        // Prevent the first input from opening the virtual keyboard on mobile.
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         <SheetHeader>
           <SheetTitle>Settings</SheetTitle>
           <SheetDescription>
@@ -212,6 +216,28 @@ export function SettingsPanel({
         </SheetHeader>
 
         <div className="scrollbar-slim flex-1 space-y-6 overflow-y-auto p-6">
+          <section className="space-y-4">
+            <h3 className="text-sm font-semibold">Appearance</h3>
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="theme-select">Theme</Label>
+              <div className="flex items-center gap-2">
+                <select
+                  id="theme-select"
+                  value={theme}
+                  onChange={(event) => setTheme(event.target.value as typeof theme)}
+                  className="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                >
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+                <ToggleThemeButton resolved={resolved} />
+              </div>
+            </div>
+          </section>
+
+          <Separator />
+
           <section className="space-y-4">
             <h3 className="text-sm font-semibold">Security</h3>
 
@@ -271,28 +297,6 @@ export function SettingsPanel({
               <p className="text-muted-foreground text-xs">
                 Applies to secrets copied with a copy button.
               </p>
-            </div>
-          </section>
-
-          <Separator />
-
-          <section className="space-y-4">
-            <h3 className="text-sm font-semibold">Appearance</h3>
-            <div className="flex items-center justify-between gap-4">
-              <Label htmlFor="theme-select">Theme</Label>
-              <div className="flex items-center gap-2">
-                <select
-                  id="theme-select"
-                  value={theme}
-                  onChange={(event) => setTheme(event.target.value as typeof theme)}
-                  className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-                >
-                  <option value="system">System</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                </select>
-                <ToggleThemeButton resolved={resolved} />
-              </div>
             </div>
           </section>
 

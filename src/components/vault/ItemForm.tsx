@@ -278,7 +278,7 @@ export function ItemForm({ item, template, templates, open, onOpenChange }: Item
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+      <DialogContent className="fixed inset-0 top-0 left-0 flex h-dvh max-h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none md:top-[50%] md:left-[50%] md:h-auto md:max-h-[90dvh] md:w-full md:max-w-2xl md:translate-x-[-50%] md:translate-y-[-50%] md:rounded-lg md:border">
         <DialogHeader className="shrink-0 border-b p-6 pb-4">
           <DialogTitle>{isNew ? 'Add item' : `Edit ${item!.title || 'item'}`}</DialogTitle>
           {isNew ? (
