@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'sandiman-pwa-'
-const CACHE_NAME = `${CACHE_PREFIX}v1`
+const CACHE_NAME = `${CACHE_PREFIX}v2`
 const APP_ROOT = new URL('./', self.registration.scope)
 const INDEX_URL = new URL('index.html', APP_ROOT).href
 const ROOT_URL = APP_ROOT.href
@@ -10,8 +10,11 @@ const SHELL_URLS = [
   INDEX_URL,
   BUILD_MANIFEST_URL,
   new URL('manifest.webmanifest', APP_ROOT).href,
-  new URL('icons/icon-192.png', APP_ROOT).href,
-  new URL('icons/icon-512.png', APP_ROOT).href,
+  new URL('favicon.ico', APP_ROOT).href,
+  new URL('favicon-16x16.png', APP_ROOT).href,
+  new URL('favicon-32x32.png', APP_ROOT).href,
+  new URL('icons/android-chrome-192x192.png', APP_ROOT).href,
+  new URL('icons/android-chrome-512x512.png', APP_ROOT).href,
   new URL('icons/apple-touch-icon.png', APP_ROOT).href,
 ]
 
