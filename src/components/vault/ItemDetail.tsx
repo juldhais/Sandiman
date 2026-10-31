@@ -2,9 +2,8 @@
  * Item detail view.
  *
  * Read-only presentation of every populated field, with copy buttons where the
- * field definition asked for one. Masked values render as text unless the user
- * reveals them individually, so an item with three secrets does not expose all
- * three at once.
+ * field definition asked for one. Masked values and note content stay hidden
+ * until revealed individually.
  */
 import { useMemo, useState } from 'react'
 import { Eye, EyeOff, ExternalLink, Pencil, Trash2 } from 'lucide-react'
@@ -35,6 +34,7 @@ export function ItemDetail({ item, template, expiries, onEdit, onDelete }: ItemD
   // Field ids the user has chosen to reveal. Reset when switching items so a
   // reveal never carries over.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set())
+  const [itemNotesRevealed, setItemNotesRevealed] = useState(false)
 
   const fields = useMemo(() => populatedFields(item, template), [item, template])
   const orphanedCount = useMemo(
@@ -114,6 +114,7 @@ export function ItemDetail({ item, template, expiries, onEdit, onDelete }: ItemD
             {fields.map((field) => {
               const expiry = expiryByField.get(field.id)
               const isSecret = field.def.type === 'masked'
+              const isNote = field.def.type === 'note'
               const isRevealed = revealed.has(field.id)
 
               return (
@@ -145,8 +146,12 @@ export function ItemDetail({ item, template, expiries, onEdit, onDelete }: ItemD
                         </div>
                       ) : field.def.type === 'boolean' ? (
                         <span className="text-sm">{field.value === 'true' ? 'Yes' : 'No'}</span>
-                      ) : field.def.type === 'note' ? (
-                        <FieldDisplay value={field.value} type="note" />
+                      ) : isNote ? (
+                        isRevealed ? (
+                          <FieldDisplay value={field.value} type="note" />
+                        ) : (
+                          <span className="text-muted-foreground text-sm italic">Hidden</span>
+                        )
                       ) : (
                         <span className="block text-sm break-words">
                           <FieldDisplay value={field.value} type={field.def.type} />
@@ -154,7 +159,7 @@ export function ItemDetail({ item, template, expiries, onEdit, onDelete }: ItemD
                       )}
                     </div>
 
-                    {isSecret ? (
+                    {isSecret || isNote ? (
                       <Button
                         type="button"
                         variant="ghost"
@@ -188,10 +193,26 @@ export function ItemDetail({ item, template, expiries, onEdit, onDelete }: ItemD
           <>
             <Separator />
             <div className="space-y-1.5">
-              <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                Notes
-              </h3>
-              <p className="text-sm leading-relaxed whitespace-pre-wrap">{item.notes}</p>
+              <div className="flex items-center justify-between">
+                <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                  Notes
+                </h3>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setItemNotesRevealed((current) => !current)}
+                  aria-label={itemNotesRevealed ? 'Hide Notes' : 'Reveal Notes'}
+                  aria-pressed={itemNotesRevealed}
+                >
+                  {itemNotesRevealed ? <EyeOff /> : <Eye />}
+                </Button>
+              </div>
+              {itemNotesRevealed ? (
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">{item.notes}</p>
+              ) : (
+                <p className="text-muted-foreground text-sm italic">Hidden</p>
+              )}
             </div>
           </>
         ) : null}
