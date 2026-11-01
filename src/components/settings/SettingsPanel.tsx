@@ -17,6 +17,7 @@ import { exportVaultCsv } from '@/storage/csvExport'
 import { changeMasterPassword, verifyMasterPassword, WrongPasswordError } from '@/storage/vaultService'
 import { destroyDatabase } from '@/storage/db'
 import { rotateSyncPassword } from '@/sync/syncEngine'
+import { createKdfParams } from '@/crypto/kdf'
 import { estimateStrength } from '@/generator/password'
 import { DEFAULT_ITERATIONS } from '@/crypto/envelope'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -100,8 +101,11 @@ export function SettingsPanel({
       if (!(await verifyMasterPassword(current))) {
         throw new WrongPasswordError()
       }
-      const rotatedRemote = await rotateSyncPassword(syncConfig, current, next)
-      await changeMasterPassword(current, next)
+      // Keep local and GitHub ciphertext on the same KDF so sync can use the
+      // already-unlocked vault key without retaining the password.
+      const newKdf = createKdfParams()
+      const rotatedRemote = await rotateSyncPassword(syncConfig, current, next, newKdf)
+      await changeMasterPassword(current, next, newKdf)
       toast.success('Master password changed', {
         description: rotatedRemote
           ? 'Your vault and GitHub copy have been re-encrypted with the new password.'

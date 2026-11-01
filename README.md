@@ -421,10 +421,17 @@ than a stale replica. Records both sides agree on are counted separately as
 newer payload. Per-key merging would produce a combination of settings that
 nobody ever chose.
 
-**Remote encryption still uses the vault master password.** A KDF descriptor is
-included in the remote envelope, and the derived sync key is held in memory only
-for the unlocked session. The GitHub PAT is a separate repository credential;
-it authorizes file access but cannot decrypt the vault.
+**Sync does not ask for the master password.** While the vault is unlocked,
+GitHub reads and writes use the same non-extractable key already held in memory
+for local encryption. The remote envelope includes its KDF descriptor, and the
+key is cleared when the vault locks. The GitHub PAT is a separate repository
+credential; it authorizes file access but cannot decrypt the vault.
+
+Older GitHub copies created before this key-sharing change may use a separate
+sync key. To migrate one, change the master password while the local and remote
+copies still use the same current password; the password-change flow re-encrypts
+the GitHub copy with the new local KDF. The normal sync flow never asks for a
+password.
 
 ### GitHub credentials
 

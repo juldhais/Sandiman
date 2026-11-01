@@ -30,7 +30,7 @@ export type SyncFailureKind =
   | 'bad-credential'
   | 'network'
   | 'auth'
-  | 'master-password-required'
+  | 'sync-key-mismatch'
   | 'wrong-master-password'
   | 'corrupt-remote'
   | 'conflict'
@@ -64,6 +64,7 @@ export async function rotateSyncPassword(
   configInput: GitHubSyncConfig,
   currentPassword: string,
   newPassword: string,
+  targetKdf: Envelope['kdf'] = createKdfParams(),
 ): Promise<boolean> {
   if (!isSyncConfigured(configInput)) return false
 
@@ -106,7 +107,7 @@ export async function rotateSyncPassword(
   // Keep the remote payload intact: local edits made since the last sync will
   // still merge normally, while every copy in this file becomes readable by
   // the new password.
-  const rotated = await sealForSync(remotePayload, newPassword)
+  const rotated = await sealForSync(remotePayload, newPassword, targetKdf)
   const content = JSON.stringify(rotated)
   ensureSize(content)
   try {
@@ -130,6 +131,11 @@ export function clearSyncSessionKey(): void {
   sessionSyncKey = null
 }
 
+/** Makes the already-unlocked vault key available to sync without retaining its password. */
+export function setSyncSessionKey(kdf: Envelope['kdf'], key: CryptoKey): void {
+  sessionSyncKey = { kdf, key }
+}
+
 /** Whether this unlocked session can run background sync without a password. */
 export function hasSyncSessionKey(): boolean {
   return sessionSyncKey !== null
@@ -140,15 +146,11 @@ async function deriveSyncKey(masterPassword: string, kdf: Envelope['kdf']): Prom
   return key
 }
 
-async function getSyncKey(
-  kdf: Envelope['kdf'],
-  masterPassword?: string,
-): Promise<CryptoKey> {
-  if (masterPassword) return deriveSyncKey(masterPassword, kdf)
+async function getSyncKey(kdf: Envelope['kdf']): Promise<CryptoKey> {
   if (sessionSyncKey && sameKdf(sessionSyncKey.kdf, kdf)) return sessionSyncKey.key
   throw new SyncError(
-    'master-password-required',
-    'Enter your vault master password to sync on this device.',
+    'sync-key-mismatch',
+    'This GitHub copy uses a different sync key than the unlocked vault. Change the master password to migrate the older GitHub copy, then sync again.',
   )
 }
 
@@ -206,15 +208,17 @@ interface RemoteFoldersRecord {
 
 async function readRemoteFolders(
   handle: GitHubHandle,
-  masterPassword?: string,
-  previousMasterPassword?: string,
+  currentPassword?: string,
+  fallbackPassword?: string,
 ): Promise<RemoteFoldersRecord | null> {
   const file = await handle.getNoteFoldersFile()
   if (!file) return null
   const envelope = parseEnvelope(file.content)
-  let key = await getSyncKey(envelope.kdf, masterPassword)
-  let needsRekey = false
+  let key = currentPassword
+    ? await deriveSyncKey(currentPassword, envelope.kdf)
+    : await getSyncKey(envelope.kdf)
   let value: unknown
+  let needsRekey = false
   try {
     value = await decryptRecord(
       { v: envelope.v, iv: envelope.iv, data: envelope.data },
@@ -225,8 +229,8 @@ async function readRemoteFolders(
     const reason = cause instanceof Error && 'reason' in cause
       ? (cause as Error & { reason?: string }).reason
       : undefined
-    if (reason !== 'wrong-password' || !previousMasterPassword) throw cause
-    key = await deriveSyncKey(previousMasterPassword, envelope.kdf)
+    if (reason !== 'wrong-password' || !fallbackPassword) throw cause
+    key = await deriveSyncKey(fallbackPassword, envelope.kdf)
     value = await decryptRecord(
       { v: envelope.v, iv: envelope.iv, data: envelope.data },
       key,
@@ -247,8 +251,6 @@ async function readRemoteFolders(
 async function syncRemoteFolders(
   handle: GitHubHandle,
   localFolders: readonly VaultNoteFolder[],
-  masterPassword: string | undefined,
-  previousMasterPassword: string | undefined,
   targetKdf: Envelope['kdf'],
   targetKey: CryptoKey,
 ): Promise<{ folders: VaultNoteFolder[]; counts: { sent: number; received: number } }> {
@@ -257,7 +259,7 @@ async function syncRemoteFolders(
   } catch (cause) {
     throw new SyncError('conflict', cause instanceof Error ? cause.message : 'The local folder tree is invalid.')
   }
-  const remote = await readRemoteFolders(handle, masterPassword, previousMasterPassword)
+  const remote = await readRemoteFolders(handle)
   const merged = mergeNoteFolders(localFolders, remote?.folders ?? [])
   try {
     validateFolderTree(merged.value)
@@ -315,8 +317,8 @@ interface RemoteNoteRecord {
 
 async function readRemoteNotes(
   handle: GitHubHandle,
-  masterPassword?: string,
-  previousMasterPassword?: string,
+  currentPassword?: string,
+  fallbackPassword?: string,
 ): Promise<RemoteNoteRecord[]> {
   const files = await handle.listNoteFiles()
   const notes = await Promise.all(files.map(async ({ path }) => {
@@ -324,9 +326,11 @@ async function readRemoteNotes(
     const file = await handle.getNoteFile(path)
     if (!file) return null
     const envelope = parseEnvelope(file.content)
-    let key = await getSyncKey(envelope.kdf, masterPassword)
-    let needsRekey = false
+    let key = currentPassword
+      ? await deriveSyncKey(currentPassword, envelope.kdf)
+      : await getSyncKey(envelope.kdf)
     let value: unknown
+    let needsRekey = false
     try {
       value = await decryptRecord(
         { v: envelope.v, iv: envelope.iv, data: envelope.data },
@@ -337,8 +341,8 @@ async function readRemoteNotes(
       const reason = cause instanceof Error && 'reason' in cause
         ? (cause as Error & { reason?: string }).reason
         : undefined
-      if (reason !== 'wrong-password' || !previousMasterPassword) throw cause
-      key = await deriveSyncKey(previousMasterPassword, envelope.kdf)
+      if (reason !== 'wrong-password' || !fallbackPassword) throw cause
+      key = await deriveSyncKey(fallbackPassword, envelope.kdf)
       value = await decryptRecord(
         { v: envelope.v, iv: envelope.iv, data: envelope.data },
         key,
@@ -359,12 +363,10 @@ async function syncRemoteNotes(
   handle: GitHubHandle,
   localNotes: readonly VaultNote[],
   folders: readonly VaultNoteFolder[],
-  masterPassword: string | undefined,
-  previousMasterPassword: string | undefined,
   targetKdf: Envelope['kdf'],
   targetKey: CryptoKey,
 ): Promise<{ notes: VaultNote[]; counts: { sent: number; received: number } }> {
-  const remoteRecords = await readRemoteNotes(handle, masterPassword, previousMasterPassword)
+  const remoteRecords = await readRemoteNotes(handle)
   const normalizeNote = (note: VaultNote): VaultNote => {
     const folderId = recoverNoteFolderId(note.folderId, folders)
     return folderId === (note.folderId ?? null)
@@ -518,10 +520,6 @@ function sameShareablePayload(left: VaultPayload, right: VaultPayload): boolean 
 
 export interface SyncRunInput {
   config: GitHubSyncConfig
-  /** Supplied for a manual sync; automatic sync reuses the in-memory key. */
-  masterPassword?: string
-  /** Prior password used only to migrate a remote file left behind by a password change. */
-  previousMasterPassword?: string
   payload: VaultPayload
 }
 
@@ -574,7 +572,7 @@ function prepareOutcome(
 
 /** Performs a merge then creates a GitHub commit only when shared data changed. */
 export async function runSync(input: SyncRunInput): Promise<SyncRunResult> {
-  const { masterPassword, previousMasterPassword, payload } = input
+  const { payload } = input
   if (!isSyncConfigured(input.config)) {
     throw new SyncError('not-configured', `Sync is missing: ${missingSyncFields(input.config).join(', ')}`)
   }
@@ -607,29 +605,17 @@ export async function runSync(input: SyncRunInput): Promise<SyncRunResult> {
   }
 
   let remote: ReadRemoteResult | null
-  let rekeyRemote = false
   try {
     const file = await handle.getFile()
     if (!file) {
       remote = null
     } else {
       const envelope = parseEnvelope(file.content)
-      let key = await getSyncKey(envelope.kdf, masterPassword)
-      let decrypted: unknown
-      try {
-        decrypted = await decryptVault(envelope, key)
-      } catch (cause) {
-        if (!(cause instanceof Error && cause.name === 'DecryptError' &&
-          (cause as Error & { reason?: string }).reason === 'wrong-password') || !previousMasterPassword) {
-          throw cause
-        }
-        key = await deriveSyncKey(previousMasterPassword, envelope.kdf)
-        decrypted = await decryptVault(envelope, key)
-        rekeyRemote = true
-      }
+      const key = await getSyncKey(envelope.kdf)
+      const decrypted = await decryptVault(envelope, key)
       const parsed = safeParseVaultPayload(decrypted)
       if (!parsed) throw new SyncError('corrupt-remote', 'The GitHub vault file is not a valid encrypted payload.')
-      if (!rekeyRemote) cacheSyncKey(envelope.kdf, key)
+      cacheSyncKey(envelope.kdf, key)
       remote = { file, envelope, payload: parsed }
     }
   } catch (cause) {
@@ -638,7 +624,7 @@ export async function runSync(input: SyncRunInput): Promise<SyncRunResult> {
 
   if (!remote) {
     const kdf = sessionSyncKey?.kdf ?? createKdfParams()
-    const key = await getSyncKey(kdf, masterPassword)
+    const key = await getSyncKey(kdf)
     const uploaded = await encryptVault(toSyncPayload(payload), key, kdf)
     const content = JSON.stringify(uploaded)
     ensureSize(content)
@@ -651,8 +637,6 @@ export async function runSync(input: SyncRunInput): Promise<SyncRunResult> {
     const folderSync = await syncRemoteFoldersSafely(
       handle,
       payload.noteFolders ?? [],
-      masterPassword,
-      previousMasterPassword,
       kdf,
       key,
     )
@@ -660,8 +644,6 @@ export async function runSync(input: SyncRunInput): Promise<SyncRunResult> {
       handle,
       payload.notes ?? [],
       folderSync.folders,
-      masterPassword,
-      previousMasterPassword,
       kdf,
       key,
     )
@@ -686,10 +668,10 @@ export async function runSync(input: SyncRunInput): Promise<SyncRunResult> {
   }
 
   const merged = mergePayloads(toSyncPayload(payload) as VaultPayload, remote.payload)
-  const changed = rekeyRemote || !sameShareablePayload(merged.payload as VaultPayload, remote.payload)
+  const changed = !sameShareablePayload(merged.payload as VaultPayload, remote.payload)
   let uploaded = remote.envelope
   if (changed) {
-    const key = await getSyncKey(remote.envelope.kdf, masterPassword)
+    const key = await getSyncKey(remote.envelope.kdf)
     uploaded = await encryptVault(toSyncPayload({ ...merged.payload, sync: payload.sync }), key, remote.envelope.kdf)
     const content = JSON.stringify(uploaded)
     ensureSize(content)
@@ -702,12 +684,10 @@ export async function runSync(input: SyncRunInput): Promise<SyncRunResult> {
   }
 
   const syncKdf = uploaded.kdf
-  const syncKey = await getSyncKey(syncKdf, masterPassword)
+  const syncKey = await getSyncKey(syncKdf)
   const folderSync = await syncRemoteFoldersSafely(
     handle,
     payload.noteFolders ?? [],
-    masterPassword,
-    previousMasterPassword,
     syncKdf,
     syncKey,
   )
@@ -715,8 +695,6 @@ export async function runSync(input: SyncRunInput): Promise<SyncRunResult> {
     handle,
     payload.notes ?? [],
     folderSync.folders,
-    masterPassword,
-    previousMasterPassword,
     syncKdf,
     syncKey,
   )

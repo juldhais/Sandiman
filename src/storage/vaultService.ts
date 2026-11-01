@@ -308,6 +308,7 @@ export async function savePayloadChanges(
 export async function changeMasterPassword(
   currentPassword: string,
   newPassword: string,
+  newKdf: KdfParams = createKdfParams(),
 ): Promise<UnlockSuccess> {
   const envelope = await readEnvelope()
   if (!envelope) throw new Error('No vault exists on this device yet')
@@ -323,7 +324,7 @@ export async function changeMasterPassword(
     throw cause
   }
 
-  const kdf = createKdfParams()
+  const kdf = newKdf
   const { key, elapsedMs } = await deriveKey(newPassword, kdf)
   const now = Date.now()
 

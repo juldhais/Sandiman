@@ -11,7 +11,6 @@ import { useVaultStore } from '@/state/vaultStore'
 import { SyncError, runSync } from '@/sync/syncEngine'
 import { isSyncConfigured } from '@/sync/types'
 import { VAULT_PAYLOAD_VERSION } from '@/storage/types'
-import { verifyMasterPassword } from '@/storage/vaultService'
 import { Button } from '@/components/ui/button'
 import {
   Sheet,
@@ -127,22 +126,13 @@ export function Workspace() {
     setMobileNavOpen(false)
   }
 
-  async function handleSyncNow(
-    masterPassword = '',
-    previousMasterPassword = '',
-  ): Promise<boolean> {
+  async function handleSyncNow(): Promise<boolean> {
     if (syncing || !isSyncConfigured(syncConfig)) return false
     setSyncing(true)
     try {
       const currentState = useVaultStore.getState()
-      if (masterPassword && !(await verifyMasterPassword(masterPassword))) {
-        throw new SyncError('wrong-master-password', 'That is not this vault’s master password.')
-      }
-
       const result = await runSync({
         config: syncConfig,
-        masterPassword,
-        previousMasterPassword,
         payload: {
           version: VAULT_PAYLOAD_VERSION,
           items: [...currentState.items, ...currentState.deletedItems],

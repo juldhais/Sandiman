@@ -2,8 +2,8 @@
  * GitHub repository sync configuration.
  *
  * The personal access token lives only inside the master-key-encrypted local
- * vault and is stripped before anything is uploaded. Remote data is encrypted
- * with a key derived from the vault master password.
+ * vault and is stripped before anything is uploaded. Remote data uses the same
+ * non-extractable encryption key as the unlocked local vault.
  */
 export interface GitHubSyncConfig {
   /** Account or organisation that owns the repository. */

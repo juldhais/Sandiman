@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { decryptRecord, decryptVault, encryptRecord } from '@/crypto/aes'
 import type { VaultNote, VaultNoteFolder, VaultPayload } from '@/storage/types'
 import type { GitHubHandle } from '@/sync/github'
-import { runSync, sealForSync, clearSyncSessionKey, rotateSyncPassword, SyncError } from '@/sync/syncEngine'
+import { runSync, sealForSync, clearSyncSessionKey, hasSyncSessionKey, rotateSyncPassword, setSyncSessionKey, SyncError } from '@/sync/syncEngine'
 import type { GitHubSyncConfig } from '@/sync/types'
 
 const github = vi.hoisted(() => ({ handle: null as unknown }))
@@ -92,8 +92,19 @@ interface RemoteFileEnvelope {
   sha: string
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   clearSyncSessionKey()
+  const { deriveKey } = await import('@/crypto/kdf')
+  const { key } = await deriveKey('master-password', {
+    name: 'PBKDF2-SHA256',
+    iterations: 10,
+    salt: 'AAAAAAAAAAAAAAAAAAAAAA==',
+  })
+  setSyncSessionKey({
+    name: 'PBKDF2-SHA256',
+    iterations: 10,
+    salt: 'AAAAAAAAAAAAAAAAAAAAAA==',
+  }, key)
   getFile = vi.fn<GitHubHandle['getFile']>().mockResolvedValue(null)
   putFile = vi.fn<GitHubHandle['putFile']>().mockResolvedValue(undefined)
   listNoteFiles = vi.fn<GitHubHandle['listNoteFiles']>().mockResolvedValue([])
@@ -121,6 +132,23 @@ beforeEach(() => {
 })
 
 describe('GitHub sync encryption and merge', () => {
+  it('syncs using the unlocked vault key without a password argument', async () => {
+    const kdf = {
+      name: 'PBKDF2-SHA256' as const,
+      iterations: 10,
+      salt: 'AAAAAAAAAAAAAAAAAAAAAA==',
+    }
+    const { deriveKey } = await import('@/crypto/kdf')
+    const { key } = await deriveKey('master-password', kdf)
+    setSyncSessionKey(kdf, key)
+
+    const result = await runSync({ config, payload })
+
+    expect(hasSyncSessionKey()).toBe(true)
+    expect(result.initialUpload).toBe(true)
+    expect(putFile).toHaveBeenCalledOnce()
+  })
+
   it('encrypts shareable data and strips local PAT settings', async () => {
     const envelope = await sealForSync({
       ...payload,
@@ -161,7 +189,7 @@ describe('GitHub sync encryption and merge', () => {
   })
 
   it('creates the encrypted file on the first sync', async () => {
-    const result = await runSync({ config, masterPassword: 'master-password', payload })
+    const result = await runSync({ config, payload })
 
     expect(putFile).toHaveBeenCalledOnce()
     expect(putFile).toHaveBeenCalledWith(expect.any(String), null)
@@ -182,7 +210,6 @@ describe('GitHub sync encryption and merge', () => {
     }
     const result = await runSync({
       config,
-      masterPassword: 'master-password',
       payload: { ...payload, notes: [note] },
     })
 
@@ -219,7 +246,6 @@ describe('GitHub sync encryption and merge', () => {
     }
     const result = await runSync({
       config,
-      masterPassword: 'master-password',
       payload: { ...payload, noteFolders: [folder] },
     })
 
@@ -278,7 +304,7 @@ describe('GitHub sync encryption and merge', () => {
     listNoteFiles.mockResolvedValue([{ path: `notes/${note.id}.json`, sha: 'note-sha' }])
     getNoteFile.mockResolvedValue({ content: JSON.stringify({ ...encryptedNote, kdf }), sha: 'note-sha' })
 
-    const result = await runSync({ config, masterPassword: 'master-password', payload })
+    const result = await runSync({ config, payload })
 
     expect(result.mergedFolders).toEqual([folder])
     expect(result.mergedNotes).toEqual([note])
@@ -308,7 +334,7 @@ describe('GitHub sync encryption and merge', () => {
     getNoteFile.mockResolvedValue({ content: JSON.stringify({ ...encrypted, kdf }), sha: 'note-sha' })
     getFile.mockResolvedValue(await remoteFile(payload))
 
-    const result = await runSync({ config, masterPassword: 'master-password', payload })
+    const result = await runSync({ config, payload })
 
     expect(result.mergedNotes).toEqual([note])
     expect(result.outcome.notesReceived).toBe(1)
@@ -338,7 +364,6 @@ describe('GitHub sync encryption and merge', () => {
 
     const result = await runSync({
       config,
-      masterPassword: 'master-password',
       payload: { ...payload, notes: [deletedNote] },
     })
 
@@ -444,7 +469,6 @@ describe('GitHub sync encryption and merge', () => {
 
     await expect(runSync({
       config,
-      masterPassword: 'master-password',
       payload: { ...payload, noteFolders: localFolders },
     })).rejects.toMatchObject({ kind: 'conflict' })
   })
@@ -464,23 +488,17 @@ describe('GitHub sync encryption and merge', () => {
     await expect(decryptVault(rotated, key)).resolves.toMatchObject({ version: payload.version })
   })
 
-  it('migrates an existing remote file encrypted with the previous password during sync', async () => {
-    getFile.mockResolvedValue(await remoteFile(payload))
-
-    const result = await runSync({
-      config,
-      masterPassword: 'new-password',
-      previousMasterPassword: 'master-password',
-      payload,
+  it('does not overwrite a remote file encrypted with an incompatible sync key', async () => {
+    const legacyEnvelope = await sealForSync(payload, 'master-password', {
+      name: 'PBKDF2-SHA256',
+      iterations: 10,
+      salt: 'BBBBBBBBBBBBBBBBBBBBBB==',
     })
+    getFile.mockResolvedValue({ content: JSON.stringify(legacyEnvelope), sha: 'legacy-sha' })
 
-    expect(putFile).toHaveBeenCalledOnce()
-    expect(result.outcome.direction).toBe('none')
-    const [content] = putFile.mock.calls[0]!
-    const migrated = JSON.parse(content) as Awaited<ReturnType<typeof sealForSync>>
-    const { deriveKey } = await import('@/crypto/kdf')
-    const { key } = await deriveKey('new-password', migrated.kdf)
-    await expect(decryptVault(migrated, key)).resolves.toMatchObject({ version: payload.version })
+    await expect(runSync({ config, payload })).rejects.toMatchObject({ kind: 'sync-key-mismatch' })
+
+    expect(putFile).not.toHaveBeenCalled()
   })
 
   it('passes the read file SHA when committing merged changes', async () => {
@@ -501,7 +519,6 @@ describe('GitHub sync encryption and merge', () => {
 
     await runSync({
       config,
-      masterPassword: 'master-password',
       payload: { ...payload, items: [localItem], updatedAt: 10 },
     })
 
@@ -514,7 +531,6 @@ describe('GitHub sync encryption and merge', () => {
 
     const result = await runSync({
       config,
-      masterPassword: 'master-password',
       payload: { ...payload, updatedAt: 99, settings: { ...payload.settings, lastSyncAt: 55 } },
     })
 
@@ -532,14 +548,13 @@ describe('GitHub sync encryption and merge', () => {
 
     await expect(runSync({
       config,
-      masterPassword: 'master-password',
       payload: { ...payload, items: [item] },
     })).rejects.toMatchObject<Partial<SyncError>>({ kind: 'conflict' })
   })
 
   it('classifies a repository without write permission', async () => {
     checkRepository.mockResolvedValue({ canPush: false, branchExists: true })
-    await expect(runSync({ config, masterPassword: 'master-password', payload }))
+    await expect(runSync({ config, payload }))
       .rejects.toMatchObject({ kind: 'auth' })
   })
 })

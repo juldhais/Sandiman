@@ -17,7 +17,7 @@ import { cancelPendingClear } from '@/lib/clipboard'
 import { newId } from '@/lib/id'
 import { createBuiltinTemplates, isBuiltinTemplateId, LEGACY_NOTE_TEMPLATE_ID } from '@/storage/builtins'
 import { validateFolderPlacement, validateFolderTree } from '@/storage/noteFolders'
-import { clearSyncSessionKey } from '@/sync/syncEngine'
+import { clearSyncSessionKey, setSyncSessionKey } from '@/sync/syncEngine'
 import {
   removeItemFields,
   resolveFields,
@@ -315,6 +315,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
         const result = await createVault(password, Date.now(), syncConfig)
         masterKey = result.key
         masterKdf = result.kdf
+        setSyncSessionKey(result.kdf, result.key)
         adoptPayload(result.payload)
         rememberPersistedPayload(result.payload)
         set({ busy: false })
@@ -331,6 +332,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => {
         const result = await unlock(password)
         masterKey = result.key
         masterKdf = result.kdf
+        setSyncSessionKey(result.kdf, result.key)
         adoptPayload(result.payload)
         rememberPersistedPayload(result.payload)
         set({ busy: false })

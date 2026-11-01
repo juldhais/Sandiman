@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { describeDestination } from '@/sync/githubConfig'
-import { hasSyncSessionKey, verifySyncCredentials } from '@/sync/syncEngine'
+import { verifySyncCredentials } from '@/sync/syncEngine'
 import { isSyncConfigured, missingSyncFields } from '@/sync/types'
 import { useVaultStore } from '@/state/vaultStore'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -38,18 +38,13 @@ export function SyncPanel({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSync: (masterPassword: string, previousMasterPassword: string) => Promise<boolean>
+  onSync: () => Promise<boolean>
   syncing: boolean
   lastRun: string | null
 }) {
   const config = useVaultStore((state) => state.sync.config)
   const settings = useVaultStore((state) => state.settings)
   const updateSyncConfig = useVaultStore((state) => state.updateSyncConfig)
-  const sessionKeyAvailable = hasSyncSessionKey()
-
-  const [masterPassword, setMasterPassword] = useState('')
-  const [previousMasterPassword, setPreviousMasterPassword] = useState('')
-  const [showMasterPassword, setShowMasterPassword] = useState(false)
   const [verifying, setVerifying] = useState(false)
   const [verification, setVerification] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -73,11 +68,6 @@ export function SyncPanel({
     <Sheet
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) {
-          setMasterPassword('')
-          setPreviousMasterPassword('')
-          setShowMasterPassword(false)
-        }
         onOpenChange(nextOpen)
       }}
     >
@@ -150,49 +140,9 @@ export function SyncPanel({
             </p>
           </div>
 
-          {sessionKeyAvailable ? (
-            <div className="space-y-2">
-              <p className="text-muted-foreground text-xs">
-                Ready to sync without re-entering your master password. This lasts until you lock the vault.
-              </p>
-              {!showMasterPassword ? (
-                <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setShowMasterPassword(true)}>
-                  Enter master password instead
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-
-          {!sessionKeyAvailable || showMasterPassword ? (
-            <div className="space-y-2">
-              <Label htmlFor="sync-master-password">Vault master password</Label>
-              <PasswordInput
-                id="sync-master-password"
-                value={masterPassword}
-                onChange={(event) => setMasterPassword(event.target.value)}
-                autoComplete="current-password"
-                spellCheck={false}
-              />
-              <p className="text-muted-foreground text-xs">
-                Needed for the first sync after unlock. The derived key is kept only in memory until you lock the vault.
-              </p>
-            </div>
-          ) : null}
-
-          <div className="space-y-2">
-            <Label htmlFor="sync-previous-password">Previous master password (if needed)</Label>
-            <PasswordInput
-              id="sync-previous-password"
-              value={previousMasterPassword}
-              onChange={(event) => setPreviousMasterPassword(event.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <p className="text-muted-foreground text-xs">
-              If this vault password was changed before GitHub was re-encrypted, enter the password
-              that protected the GitHub copy. It is used once to migrate that copy to your current password.
-            </p>
-          </div>
+          <p className="text-muted-foreground text-xs">
+            Sync uses the vault’s already-unlocked encryption key in memory. Your master password is never requested or sent to GitHub.
+          </p>
 
           <Separator />
 
@@ -211,8 +161,8 @@ export function SyncPanel({
             {config.autoSync ? (
               <div className="space-y-2">
                 <p className="text-muted-foreground text-xs">
-                  Automatic sync uses the in-memory key after one successful manual sync each time
-                  you unlock. A changed vault file creates a GitHub commit.
+                  Automatic sync uses the in-memory vault key while the vault is unlocked. A changed
+                  vault file creates a GitHub commit.
                 </p>
                 <Label htmlFor="sync-interval">Every (minutes)</Label>
                 <Input
@@ -269,12 +219,7 @@ export function SyncPanel({
               <Button
                 size="sm"
                 onClick={() => {
-                  void onSync(masterPassword, previousMasterPassword).then((success) => {
-                    if (success) {
-                      setMasterPassword('')
-                      setPreviousMasterPassword('')
-                    }
-                  })
+                  void onSync()
                 }}
                 disabled={syncing || missing.length > 0}
               >
@@ -311,7 +256,6 @@ export function SyncPanel({
           </Button>
           <Button
             onClick={() => {
-              setMasterPassword('')
               onOpenChange(false)
               toast.success('GitHub sync settings saved')
             }}
