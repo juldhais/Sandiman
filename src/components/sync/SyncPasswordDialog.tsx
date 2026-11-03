@@ -1,8 +1,8 @@
 /**
- * Asks for the master password when the GitHub copy was encrypted under a
- * different salt, which happens when the repository was first written by
- * another vault. The password is only used to re-encrypt that copy and is
- * discarded when the dialog closes.
+ * Asks for the master password when this vault's salt differs from the GitHub
+ * copy's, which happens when the repository was first written by another
+ * device. The password is only used to verify the GitHub copy and to re-key
+ * this vault to its salt, and is discarded when the dialog closes.
  */
 import { useState, type FormEvent } from 'react'
 import { Loader2 } from 'lucide-react'
@@ -53,8 +53,8 @@ export function SyncPasswordDialog({ open, onOpenChange, onSubmit }: SyncPasswor
           <DialogTitle>Connect this vault to the GitHub copy</DialogTitle>
           <DialogDescription>
             The GitHub copy was encrypted with a different salt than this vault. Enter the master
-            password you use for this vault. The GitHub copy will be re-encrypted so it matches
-            this vault. The password is not stored.
+            password for the GitHub copy. This vault will be re-encrypted with the GitHub copy's
+            salt so all devices match. The password is not stored.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={(event) => void handleSubmit(event)} className="grid gap-3">

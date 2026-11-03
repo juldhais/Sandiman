@@ -125,28 +125,34 @@ export async function rotateSyncPassword(
 }
 
 /**
- * Migrates a GitHub copy encrypted under a different salt to the unlocked
- * vault's salt. The password is used once to derive keys and is never stored.
- * It is first checked against the unlocked key so a typo cannot re-encrypt the
- * GitHub copy under a key this vault does not hold.
+ * Returns the KDF descriptor (salt included) that the GitHub copy was encrypted
+ * under, after checking that `password` opens it. The GitHub copy is the shared
+ * salt authority: a device that joins with a different salt re-keys its local
+ * vault to this descriptor instead of rewriting GitHub, so every device converges
+ * on one salt. Returns null when GitHub has no vault yet.
  */
-export async function adoptRemoteSyncPassword(
+export async function readRemoteSyncKdf(
   configInput: GitHubSyncConfig,
   password: string,
-): Promise<void> {
-  const session = sessionSyncKey
-  if (!session) throw new SyncError('sync-key-mismatch', 'Unlock the vault before syncing.')
-
-  const probe = await encryptRecord({ check: 'sync-password' }, session.key, 'sync-password-check')
-  const candidate = await deriveSyncKey(password, session.kdf)
+): Promise<Envelope['kdf'] | null> {
+  let handle: GitHubHandle
   try {
-    await decryptRecord(probe, candidate, 'sync-password-check')
-  } catch {
-    throw new SyncError('wrong-master-password', 'That master password does not unlock this vault.')
+    handle = await makeHandle(normaliseConfig(configInput))
+  } catch (cause) {
+    throw classify(cause)
   }
 
-  await rotateSyncPassword(configInput, password, password, session.kdf)
-  setSyncSessionKey(session.kdf, session.key)
+  try {
+    const file = await handle.getFile()
+    if (!file) return null
+    const envelope = parseEnvelope(file.content)
+    const key = await deriveSyncKey(password, envelope.kdf)
+    const parsed = safeParseVaultPayload(await decryptVault(envelope, key))
+    if (!parsed) throw new SyncError('corrupt-remote', 'The GitHub vault file is not a valid encrypted payload.')
+    return envelope.kdf
+  } catch (cause) {
+    throw classifyRemote(cause)
+  }
 }
 
 let sessionSyncKey: { kdf: Envelope['kdf']; key: CryptoKey } | null = null

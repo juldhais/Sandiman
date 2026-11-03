@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { decryptRecord, decryptVault, encryptRecord } from '@/crypto/aes'
 import type { VaultNote, VaultNoteFolder, VaultPayload } from '@/storage/types'
 import type { GitHubHandle } from '@/sync/github'
-import { runSync, sealForSync, clearSyncSessionKey, hasSyncSessionKey, rotateSyncPassword, setSyncSessionKey, adoptRemoteSyncPassword, SyncError } from '@/sync/syncEngine'
+import { runSync, sealForSync, clearSyncSessionKey, hasSyncSessionKey, rotateSyncPassword, setSyncSessionKey, readRemoteSyncKdf, SyncError } from '@/sync/syncEngine'
 import type { GitHubSyncConfig } from '@/sync/types'
 
 const github = vi.hoisted(() => ({ handle: null as unknown }))
@@ -473,7 +473,7 @@ describe('GitHub sync encryption and merge', () => {
     })).rejects.toMatchObject({ kind: 'conflict' })
   })
 
-  it('adopts a GitHub copy encrypted under another salt when the password matches this vault', async () => {
+  it('returns the GitHub copy salt so the joining device can re-key to it', async () => {
     const remoteKdf = {
       name: 'PBKDF2-SHA256' as const,
       iterations: 10,
@@ -482,15 +482,12 @@ describe('GitHub sync encryption and merge', () => {
     const envelope = await sealForSync(payload, 'master-password', remoteKdf)
     getFile.mockResolvedValue({ content: JSON.stringify(envelope), sha: 'remote-sha' })
 
-    await adoptRemoteSyncPassword(config, 'master-password')
+    await expect(readRemoteSyncKdf(config, 'master-password')).resolves.toEqual(remoteKdf)
 
-    expect(putFile).toHaveBeenCalledTimes(1)
-    const written = JSON.parse(putFile.mock.calls[0]![0]) as { kdf: { salt: string } }
-    expect(written.kdf.salt).toBe('AAAAAAAAAAAAAAAAAAAAAA==')
-    expect(hasSyncSessionKey()).toBe(true)
+    expect(putFile).not.toHaveBeenCalled()
   })
 
-  it('does not touch the GitHub copy when the password does not unlock this vault', async () => {
+  it('does not touch the GitHub copy when the password does not open it', async () => {
     const envelope = await sealForSync(payload, 'master-password', {
       name: 'PBKDF2-SHA256',
       iterations: 10,
@@ -498,10 +495,14 @@ describe('GitHub sync encryption and merge', () => {
     })
     getFile.mockResolvedValue({ content: JSON.stringify(envelope), sha: 'remote-sha' })
 
-    await expect(adoptRemoteSyncPassword(config, 'wrong-password')).rejects.toMatchObject({
+    await expect(readRemoteSyncKdf(config, 'wrong-password')).rejects.toMatchObject({
       kind: 'wrong-master-password',
     })
     expect(putFile).not.toHaveBeenCalled()
+  })
+
+  it('reports no salt when GitHub has no vault yet', async () => {
+    await expect(readRemoteSyncKdf(config, 'master-password')).resolves.toBeNull()
   })
 
   it('re-encrypts the GitHub copy when the master password changes', async () => {

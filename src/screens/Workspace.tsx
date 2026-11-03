@@ -8,7 +8,8 @@ import { useRef, useState } from 'react'
 import { Loader2, Menu, Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { useVaultStore } from '@/state/vaultStore'
-import { SyncError, adoptRemoteSyncPassword, runSync } from '@/sync/syncEngine'
+import { SyncError, readRemoteSyncKdf, runSync } from '@/sync/syncEngine'
+import { changeMasterPassword } from '@/storage/vaultService'
 import { isSyncConfigured } from '@/sync/types'
 import { VAULT_PAYLOAD_VERSION } from '@/storage/types'
 import { Button } from '@/components/ui/button'
@@ -182,9 +183,18 @@ export function Workspace() {
   }
 
   async function handleSyncPasswordSubmit(password: string): Promise<void> {
-    await adoptRemoteSyncPassword(syncConfig, password)
+    const remoteKdf = await readRemoteSyncKdf(syncConfig, password)
+    if (remoteKdf) {
+      // Re-key this vault to the GitHub salt with the same password. The session
+      // key then no longer matches the stored envelope, so lock and let the user
+      // unlock again before syncing.
+      await changeMasterPassword(password, password, remoteKdf)
+    }
     setSyncPasswordOpen(false)
-    await handleSyncNow()
+    lock()
+    toast.success('Vault matched to the GitHub copy', {
+      description: 'Unlock the vault again, then sync.',
+    })
   }
 
   const sidebarProps: SidebarProps = {
