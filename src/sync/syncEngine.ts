@@ -124,6 +124,31 @@ export async function rotateSyncPassword(
   return true
 }
 
+/**
+ * Migrates a GitHub copy encrypted under a different salt to the unlocked
+ * vault's salt. The password is used once to derive keys and is never stored.
+ * It is first checked against the unlocked key so a typo cannot re-encrypt the
+ * GitHub copy under a key this vault does not hold.
+ */
+export async function adoptRemoteSyncPassword(
+  configInput: GitHubSyncConfig,
+  password: string,
+): Promise<void> {
+  const session = sessionSyncKey
+  if (!session) throw new SyncError('sync-key-mismatch', 'Unlock the vault before syncing.')
+
+  const probe = await encryptRecord({ check: 'sync-password' }, session.key, 'sync-password-check')
+  const candidate = await deriveSyncKey(password, session.kdf)
+  try {
+    await decryptRecord(probe, candidate, 'sync-password-check')
+  } catch {
+    throw new SyncError('wrong-master-password', 'That master password does not unlock this vault.')
+  }
+
+  await rotateSyncPassword(configInput, password, password, session.kdf)
+  setSyncSessionKey(session.kdf, session.key)
+}
+
 let sessionSyncKey: { kdf: Envelope['kdf']; key: CryptoKey } | null = null
 
 /** Drops the non-extractable sync key whenever the local vault is locked. */

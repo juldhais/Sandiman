@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { decryptRecord, decryptVault, encryptRecord } from '@/crypto/aes'
 import type { VaultNote, VaultNoteFolder, VaultPayload } from '@/storage/types'
 import type { GitHubHandle } from '@/sync/github'
-import { runSync, sealForSync, clearSyncSessionKey, hasSyncSessionKey, rotateSyncPassword, setSyncSessionKey, SyncError } from '@/sync/syncEngine'
+import { runSync, sealForSync, clearSyncSessionKey, hasSyncSessionKey, rotateSyncPassword, setSyncSessionKey, adoptRemoteSyncPassword, SyncError } from '@/sync/syncEngine'
 import type { GitHubSyncConfig } from '@/sync/types'
 
 const github = vi.hoisted(() => ({ handle: null as unknown }))
@@ -471,6 +471,37 @@ describe('GitHub sync encryption and merge', () => {
       config,
       payload: { ...payload, noteFolders: localFolders },
     })).rejects.toMatchObject({ kind: 'conflict' })
+  })
+
+  it('adopts a GitHub copy encrypted under another salt when the password matches this vault', async () => {
+    const remoteKdf = {
+      name: 'PBKDF2-SHA256' as const,
+      iterations: 10,
+      salt: 'BBBBBBBBBBBBBBBBBBBBBB==',
+    }
+    const envelope = await sealForSync(payload, 'master-password', remoteKdf)
+    getFile.mockResolvedValue({ content: JSON.stringify(envelope), sha: 'remote-sha' })
+
+    await adoptRemoteSyncPassword(config, 'master-password')
+
+    expect(putFile).toHaveBeenCalledTimes(1)
+    const written = JSON.parse(putFile.mock.calls[0]![0]) as { kdf: { salt: string } }
+    expect(written.kdf.salt).toBe('AAAAAAAAAAAAAAAAAAAAAA==')
+    expect(hasSyncSessionKey()).toBe(true)
+  })
+
+  it('does not touch the GitHub copy when the password does not unlock this vault', async () => {
+    const envelope = await sealForSync(payload, 'master-password', {
+      name: 'PBKDF2-SHA256',
+      iterations: 10,
+      salt: 'BBBBBBBBBBBBBBBBBBBBBB==',
+    })
+    getFile.mockResolvedValue({ content: JSON.stringify(envelope), sha: 'remote-sha' })
+
+    await expect(adoptRemoteSyncPassword(config, 'wrong-password')).rejects.toMatchObject({
+      kind: 'wrong-master-password',
+    })
+    expect(putFile).not.toHaveBeenCalled()
   })
 
   it('re-encrypts the GitHub copy when the master password changes', async () => {

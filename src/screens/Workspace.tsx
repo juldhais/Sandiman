@@ -8,7 +8,7 @@ import { useRef, useState } from 'react'
 import { Loader2, Menu, Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { useVaultStore } from '@/state/vaultStore'
-import { SyncError, runSync } from '@/sync/syncEngine'
+import { SyncError, adoptRemoteSyncPassword, runSync } from '@/sync/syncEngine'
 import { isSyncConfigured } from '@/sync/types'
 import { VAULT_PAYLOAD_VERSION } from '@/storage/types'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,7 @@ import { VaultModule } from '@/components/vault/VaultModule'
 import { Sidebar, type SidebarProps } from '@/components/shell/Sidebar'
 import type { ModuleView } from '@/components/shell/moduleView'
 import { SyncPanel } from '@/components/sync/SyncPanel'
+import { SyncPasswordDialog } from '@/components/sync/SyncPasswordDialog'
 import { SettingsPanel } from '@/components/settings/SettingsPanel'
 import { TemplateManager } from '@/components/templates/TemplateManager'
 import { NotesModule } from '@/components/notes/NotesModule'
@@ -49,6 +50,7 @@ export function Workspace() {
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [syncPasswordOpen, setSyncPasswordOpen] = useState(false)
   const [lastSyncMessage, setLastSyncMessage] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -166,6 +168,10 @@ export function Workspace() {
       toast.success(initialUpload ? 'Vault uploaded' : 'Sync complete', { description: summary })
       return true
     } catch (cause) {
+      if (cause instanceof SyncError && cause.kind === 'sync-key-mismatch') {
+        setSyncPasswordOpen(true)
+        return false
+      }
       const message = cause instanceof SyncError ? cause.message : 'The sync could not be completed'
       setLastSyncMessage(message)
       toast.error('Sync failed', { description: message })
@@ -173,6 +179,12 @@ export function Workspace() {
     } finally {
       setSyncing(false)
     }
+  }
+
+  async function handleSyncPasswordSubmit(password: string): Promise<void> {
+    await adoptRemoteSyncPassword(syncConfig, password)
+    setSyncPasswordOpen(false)
+    await handleSyncNow()
   }
 
   const sidebarProps: SidebarProps = {
@@ -281,6 +293,11 @@ export function Workspace() {
         onSync={handleSyncNow}
         syncing={syncing}
         lastRun={lastSyncMessage}
+      />
+      <SyncPasswordDialog
+        open={syncPasswordOpen}
+        onOpenChange={setSyncPasswordOpen}
+        onSubmit={handleSyncPasswordSubmit}
       />
       <SettingsPanel open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
